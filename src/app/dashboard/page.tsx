@@ -8,6 +8,7 @@ import { useTransactions } from '@/hooks/useTransactions';
 import { OverviewTab } from '@/components/OverviewTab';
 import { AnalyticsTab } from '@/components/AnalyticsTab';
 import { EditTransactionModal } from '@/components/EditTransactionModal';
+import { ContasTab } from '@/components/ContasTab';
 
 // Dados de exemplo para demonstração
 const sampleData: Transaction[] = [
@@ -234,7 +235,11 @@ export default function DashboardPage() {
               <AnalyticsTab transactions={transactions} />
             )}
 
-            {['contas', 'cartoes', 'receitas', 'investimentos'].includes(activeTab) && (
+            {activeTab === 'contas' && (
+              <ContasTab transactions={transactions} />
+            )}
+
+            {['cartoes', 'receitas', 'investimentos'].includes(activeTab) && (
               <div className="bg-gray-800 p-12 rounded-lg border border-gray-700 text-center">
                 <div className="text-6xl mb-4">🚧</div>
                 <h3 className="text-xl font-semibold text-gray-100 mb-2">Em Construção</h3>

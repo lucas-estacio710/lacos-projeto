@@ -1,6 +1,6 @@
 import { Categories } from '@/types';
 
-// Categorias PJ
+// Categorias PJ - ATUALIZADAS com seus dados reais
 export const categoriesPJ: Categories = {
   'Receita de Planos': {
     subtipos: ['P_INDIVIDUAL', 'P_COLETIVA'],
@@ -34,7 +34,7 @@ export const categoriesPJ: Categories = {
   }
 };
 
-// Categorias PF
+// Categorias PF - ATUALIZADAS com seus dados reais
 export const categoriesPF: Categories = {
   'Contas Fixas': {
     subtipos: ['MORADIA PESSOAL', 'CONTAS CONSUMO', 'ESCOLA OLI', 'DIARISTA', 'ASSINATURAS'],
@@ -63,7 +63,7 @@ export const categoriesPF: Categories = {
   }
 };
 
-// Categorias CONC
+// Categorias CONC - ATUALIZADAS com seus dados reais
 export const categoriesCONC: Categories = {
   'Entrecontas': {
     subtipos: ['ENTRECONTAS'],

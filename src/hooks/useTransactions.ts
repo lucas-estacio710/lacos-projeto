@@ -39,80 +39,100 @@ export function useTransactions() {
   };
 
   // Adicionar múltiplas transações
-  const addTransactions = async (newTransactions: Transaction[]) => {
-    try {
-      console.log('🔄 Iniciando addTransactions com:', newTransactions.length, 'transações');
-      
-      const { data: { user } } = await supabase.auth.getUser();
-      console.log('👤 User:', user?.id);
-      
-      if (!user) {
-        throw new Error('Usuário não autenticado');
+    const addTransactions = async (newTransactions: Transaction[]) => {
+      try {
+        console.log('🔄 Iniciando addTransactions com:', newTransactions.length, 'transações');
+        
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (!user) {
+          throw new Error('Usuário não autenticado');
+        }
+
+        // Preparar dados para inserção
+        const transactionsToInsert = newTransactions.map(transaction => ({
+          id: transaction.id,
+          user_id: user.id,
+          mes: transaction.mes,
+          data: transaction.data,
+          descricao_origem: transaction.descricao_origem,
+          subtipo: transaction.subtipo,
+          categoria: transaction.categoria,
+          descricao: transaction.descricao,
+          valor: transaction.valor,
+          origem: transaction.origem,
+          cc: transaction.cc,
+          realizado: transaction.realizado,
+          conta: transaction.conta
+        }));
+
+        console.log('📝 Total de transações para inserir:', transactionsToInsert.length);
+
+        // ETAPA 1: Verificar quantas já existem (para contar duplicatas)
+        const existingIds = transactionsToInsert.map(t => t.id);
+        const { data: existingTransactions, error: checkError } = await supabase
+          .from('transactions')
+          .select('id')
+          .eq('user_id', user.id)
+          .in('id', existingIds);
+
+        if (checkError) {
+          console.error('❌ Erro ao verificar duplicatas:', checkError);
+          throw checkError;
+        }
+
+        const existingIdSet = new Set(existingTransactions?.map(t => t.id) || []);
+        const duplicatesCount = existingIds.filter(id => existingIdSet.has(id)).length;
+        const newCount = transactionsToInsert.length - duplicatesCount;
+
+        console.log('🔍 Análise de duplicatas:');
+        console.log('  📊 Total enviado:', transactionsToInsert.length);
+        console.log('  ✅ Novas:', newCount);
+        console.log('  🔄 Duplicatas:', duplicatesCount);
+
+        // ETAPA 2: Inserir com upsert (funciona independente de duplicatas)
+        const { data: _, error: supabaseError } = await supabase
+          .from('transactions')
+          .upsert(transactionsToInsert, { 
+            onConflict: 'id',
+            ignoreDuplicates: false 
+          })
+          .select();
+
+        if (supabaseError) {
+          console.error('❌ Erro do Supabase:', supabaseError);
+          throw supabaseError;
+        }
+
+        // ETAPA 3: Atualizar estado local (apenas com novas)
+        setTransactions(prev => {
+          const prevIdSet = new Set(prev.map(t => t.id));
+          const newOnes = newTransactions.filter(t => !prevIdSet.has(t.id));
+          console.log('✅ Adicionando ao estado local:', newOnes.length, 'novas transações');
+          return [...prev, ...newOnes];
+        });
+
+        console.log('✅ addTransactions concluído com sucesso');
+        
+        // RETORNAR ESTATÍSTICAS SIMPLES E CONFIÁVEIS
+        return {
+          success: true,
+          stats: {
+            total: transactionsToInsert.length,
+            added: newCount,
+            duplicates: duplicatesCount
+          }
+        };
+        
+      } catch (err) {
+        console.error('❌ Erro completo:', err);
+        setError(err instanceof Error ? err.message : 'Erro ao salvar transações');
+        throw err;
       }
-
-      // Preparar dados para inserção
-      const transactionsToInsert = newTransactions.map(transaction => ({
-        id: transaction.id,
-        user_id: user.id,
-        mes: transaction.mes,
-        data: transaction.data,
-        descricao_origem: transaction.descricao_origem,
-        subtipo: transaction.subtipo,
-        categoria: transaction.categoria,
-        descricao: transaction.descricao,
-        valor: transaction.valor,
-        origem: transaction.origem,
-        cc: transaction.cc,
-        realizado: transaction.realizado,
-        conta: transaction.conta
-      }));
-
-      console.log('📝 Total de transações para inserir:', transactionsToInsert.length);
-      console.log('📝 Primeira transação:', transactionsToInsert[0]);
-      console.log('📝 Estrutura completa da primeira:', JSON.stringify(transactionsToInsert[0], null, 2));
-
-      // Inserir no Supabase com upsert para evitar duplicatas
-      const { data, error: supabaseError } = await supabase
-        .from('transactions')
-        .upsert(transactionsToInsert, { 
-          onConflict: 'id,user_id',
-          ignoreDuplicates: false 
-        })
-        .select();
-
-      console.log('🔄 Resposta Supabase data:', data);
-      console.log('🔄 Resposta Supabase error:', supabaseError);
-      console.log('🔄 Resposta completa:', { data, error: supabaseError });
-
-      if (supabaseError) {
-        console.error('❌ Erro do Supabase:', supabaseError);
-        throw supabaseError;
-      }
-
-      // Atualizar estado local
-      setTransactions(prev => {
-        const existingIds = new Set(prev.map(t => t.id));
-        const newOnes = newTransactions.filter(t => !existingIds.has(t.id));
-        console.log('✅ Adicionando ao estado local:', newOnes.length, 'novas transações');
-        return [...prev, ...newOnes];
-      });
-
-      console.log('✅ addTransactions concluído com sucesso');
-      return data;
-    } catch (err) {
-      console.error('❌ Erro completo:', err);
-      console.error('❌ Erro tipo:', typeof err);
-      console.error('❌ Erro stringified:', JSON.stringify(err, null, 2));
-      console.error('❌ Erro message:', err instanceof Error ? err.message : 'Sem message');
-      console.error('❌ Erro stack:', err instanceof Error ? err.stack : 'Sem stack');
-      
-      setError(err instanceof Error ? err.message : 'Erro ao salvar transações');
-      throw err;
-    }
-  };
+    };
 
   // Atualizar uma transação específica
-  const updateTransaction = async (updatedTransaction: Transaction) => {
+  const updateTransaction = async (updatedTransaction: Transaction): Promise<Transaction | null> => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {

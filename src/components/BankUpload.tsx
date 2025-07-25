@@ -5,7 +5,7 @@ import { Transaction, BankType } from '@/types';
 interface BankUploadProps {
   isOpen: boolean;
   onClose: () => void;
-  onTransactionsImported: (transactions: Transaction[]) => void;
+  onTransactionsImported: (transactions: Transaction[]) => Promise<{ success: boolean; stats?: { total: number; added: number; duplicates: number } } | void>;
 }
 
 export function BankUpload({ isOpen, onClose, onTransactionsImported }: BankUploadProps) {
@@ -105,7 +105,6 @@ export function BankUpload({ isOpen, onClose, onTransactionsImported }: BankUplo
       console.log('Total de linhas no arquivo:', lines.length);
       
       const importedTransactions: Transaction[] = [];
-      let duplicatesCount = 0;
       let processedLines = 0;
       
       if (selectedBank === 'Inter') {
@@ -206,10 +205,10 @@ export function BankUpload({ isOpen, onClose, onTransactionsImported }: BankUplo
           cols.push(current.trim());
           
           if (cols.length >= 5) {
-            let data = cols[0].replace(/^"|"$/g, '').trim();
-            let lancamento = cols[1].replace(/^"|"$/g, '').trim();
-            let detalhes = cols[2].replace(/^"|"$/g, '').trim();
-            let valorStr = cols[4].replace(/^"|"$/g, '').trim();
+          const data = cols[0].replace(/^"|"$/g, '').trim();
+          const lancamento = cols[1].replace(/^"|"$/g, '').trim();
+          const detalhes = cols[2].replace(/^"|"$/g, '').trim();
+          const valorStr = cols[4].replace(/^"|"$/g, '').trim();
             
             const descricao_origem = `${lancamento}${detalhes ? ' - ' + detalhes : ''}`.trim();
             
@@ -265,31 +264,45 @@ export function BankUpload({ isOpen, onClose, onTransactionsImported }: BankUplo
         return;
       }
 
-      // Importar e obter estatísticas
-      try {
-        const result: any = await onTransactionsImported(importedTransactions);
-        
-        // Verificar se temos estatísticas
-        let message = '';
-        if (result?.stats) {
-          const { total, added, duplicates } = result.stats;
-          message = `✅ ${total} transações processadas!\n`;
-          message += `➕ ${added} novas transações adicionadas\n`;
-          message += `🔄 ${duplicates} duplicatas ignoradas\n`;
-          message += `📊 ${processedLines} linhas processadas no arquivo`;
-        } else {
-          // Fallback para o formato antigo
-          message = `✅ ${importedTransactions.length} transações processadas!\n`;
-          message += `🔄 Sistema evitou duplicatas automaticamente\n`;
-          message += `📊 Total de linhas processadas: ${processedLines}`;
-        }
-        
-        alert(message);
-        onClose();
-      } catch (error) {
-        console.error('Erro ao processar transações:', error);
-        alert('❌ Erro ao processar transações. Verifique o console para mais detalhes.');
+        // Importar transações COM estatísticas
+  try {
+    const result = await onTransactionsImported(importedTransactions);
+    
+    // Mensagem inteligente baseada nas estatísticas REAIS
+    let message = '';
+    if (result?.success && result?.stats) {
+      // SOLUÇÃO ROBUSTA: Destructuring com valores padrão
+      const { total = 0, added = 0, duplicates = 0 } = result.stats;
+      
+      message = `✅ Importação concluída!\n\n`;
+      message += `📊 ${total} transações processadas\n`;
+      message += `➕ ${added} novas transações adicionadas\n`;
+      
+      if (duplicates > 0) {
+        message += `🔄 ${duplicates} duplicatas ignoradas\n`;
       }
+      
+      message += `\n📁 ${processedLines} linhas lidas do arquivo`;
+      
+      // Mensagem contextual
+      if (duplicates > 0 && added > 0) {
+        message += `\n\n💡 Arquivo continha dados novos e já existentes - mesclado com sucesso!`;
+      } else if (duplicates > 0 && added === 0) {
+        message += `\n\n💡 Todas as transações já existiam no sistema.`;
+      } else if (added === total) {
+        message += `\n\n💡 Todas as transações eram novas!`;
+      }
+    } else {
+      // Fallback para caso algo não funcione perfeitamente
+      message = `✅ ${importedTransactions.length} transações processadas!\n📊 ${processedLines} linhas lidas do arquivo`;
+    }
+    
+    alert(message);
+    onClose();
+  } catch (error) {
+    console.error('Erro ao processar transações:', error);
+    alert('❌ Erro ao processar transações. Verifique o console para mais detalhes.');
+  }
       
     } catch (error) {
       console.error(`Error importing ${selectedBank} file:`, error);

@@ -2,13 +2,16 @@
 
 import React, { useState } from 'react';
 import { Upload } from 'lucide-react';
-import { Transaction } from '@/types';
+import { Transaction, FutureTransaction } from '@/types';
 import BankUpload from '@/components/BankUpload';
 import { useTransactions } from '@/hooks/useTransactions';
+import { useFutureTransactions } from '@/hooks/useFutureTransactions';
 import { OverviewTab } from '@/components/OverviewTab';
 import { AnalyticsTab } from '@/components/AnalyticsTab';
 import { EditTransactionModal } from '@/components/EditTransactionModal';
+import { EditFutureTransactionModal } from '@/components/EditFutureTransactionModal';
 import { ContasTab } from '@/components/ContasTab';
+import { CartoesTab } from '@/components/CartoesTab';
 
 // Dados de exemplo para demonstração
 const sampleData: Transaction[] = [
@@ -86,8 +89,10 @@ const sampleData: Transaction[] = [
 
 export default function DashboardPage() {
   const { transactions, addTransactions, updateTransaction } = useTransactions();
+  const { futureTransactions, addFutureTransactions, updateFutureTransaction, updateRelatedParcelas } = useFutureTransactions();
   const [activeTab, setActiveTab] = useState('todos');
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+  const [editingFutureTransaction, setEditingFutureTransaction] = useState<FutureTransaction | null>(null);
   const [showBankUpload, setShowBankUpload] = useState(false);
 
   const loadSampleData = () => {
@@ -99,9 +104,52 @@ export default function DashboardPage() {
     setEditingTransaction(transaction);
   };
 
+  const handleEditFutureTransaction = (transaction: FutureTransaction) => {
+    setEditingFutureTransaction(transaction);
+  };
+
   const handleSaveTransaction = (updatedTransaction: Transaction) => {
     updateTransaction(updatedTransaction);
     setEditingTransaction(null);
+  };
+
+  const handleSaveFutureTransaction = async (updatedTransaction: FutureTransaction, updateParcelas: boolean) => {
+    try {
+      console.log('🔄 Salvando transação futura:', updatedTransaction.id);
+      console.log('📋 Atualizar parcelas:', updateParcelas);
+      
+      // Atualizar a transação principal
+      await updateFutureTransaction(updatedTransaction);
+      console.log('✅ Transação principal atualizada');
+      
+      // Se deve atualizar parcelas e a transação tem parcelas
+      if (updateParcelas && updatedTransaction.parcela_total > 1 && !updatedTransaction.original_transaction_id) {
+        console.log('🔄 Iniciando atualização de parcelas relacionadas...');
+        
+        await updateRelatedParcelas(
+          updatedTransaction.id, 
+          updatedTransaction.categoria, 
+          updatedTransaction.subtipo,
+          updatedTransaction.conta || 'PF'
+        );
+        
+        console.log('✅ Parcelas relacionadas atualizadas');
+      }
+      
+      setEditingFutureTransaction(null);
+      console.log('✅ Processo de salvamento concluído com sucesso');
+      
+    } catch (error) {
+      console.error('❌ Erro ao salvar transação futura:', error);
+      
+      // Mensagem de erro mais específica
+      let errorMessage = 'Erro ao salvar transação. Tente novamente.';
+      if (error instanceof Error) {
+        errorMessage = `Erro: ${error.message}`;
+      }
+      
+      alert(`❌ ${errorMessage}`);
+    }
   };
 
   const handleTransactionsImported = async (importedTransactions: Transaction[]) => {
@@ -110,6 +158,16 @@ export default function DashboardPage() {
       return result; // Retorna as estatísticas para o BankUpload
     } catch (error) {
       console.error('Erro ao importar transações:', error);
+      throw error;
+    }
+  };
+
+  const handleFutureTransactionsImported = async (importedFutureTransactions: FutureTransaction[], referenceMes: string) => {
+    try {
+      const result = await addFutureTransactions(importedFutureTransactions);
+      return result; // Retorna as estatísticas para o BankUpload
+    } catch (error) {
+      console.error('Erro ao importar transações futuras:', error);
       throw error;
     }
   };
@@ -125,14 +183,14 @@ export default function DashboardPage() {
           <button
             onClick={() => setShowBankUpload(true)}
             className="absolute right-4 top-1/2 transform -translate-y-1/2 w-8 h-8 bg-white/20 hover:bg-white/30 rounded-full flex items-center justify-center transition-colors"
-            title="Importar dados bancários"
+            title="Importar dados bancários/cartões"
           >
             <span className="text-2xl leading-none mb-1">+</span>
           </button>
         </div>
 
         {/* Área de importação inicial */}
-        {transactions.length === 0 && (
+        {transactions.length === 0 && futureTransactions.length === 0 && (
           <div className="bg-gray-800 p-4 rounded-lg shadow-lg border border-gray-700 mb-4">
             <h3 className="font-semibold mb-3 text-gray-100">📊 Importar Dados</h3>
             <button
@@ -140,7 +198,7 @@ export default function DashboardPage() {
               className="w-full p-3 border-2 border-dashed border-gray-600 rounded-lg hover:border-blue-500 transition-colors mb-3"
             >
               <Upload className="w-6 h-6 mx-auto mb-2 text-gray-400" />
-              <p className="text-sm text-gray-400">Importar Extrato Bancário</p>
+              <p className="text-sm text-gray-400">Importar Extrato/Fatura</p>
             </button>
             <button
               onClick={loadSampleData}
@@ -152,7 +210,7 @@ export default function DashboardPage() {
         )}
 
         {/* Navegação e conteúdo principal */}
-        {transactions.length > 0 && (
+        {(transactions.length > 0 || futureTransactions.length > 0) && (
           <>
             {/* Tabs de navegação */}
             <div className="space-y-2">
@@ -239,7 +297,14 @@ export default function DashboardPage() {
               <ContasTab transactions={transactions} />
             )}
 
-            {['cartoes', 'receitas', 'investimentos'].includes(activeTab) && (
+            {activeTab === 'cartoes' && (
+              <CartoesTab 
+                futureTransactions={futureTransactions}
+                onEditFutureTransaction={handleEditFutureTransaction}
+              />
+            )}
+
+            {['receitas', 'investimentos'].includes(activeTab) && (
               <div className="bg-gray-800 p-12 rounded-lg border border-gray-700 text-center">
                 <div className="text-6xl mb-4">🚧</div>
                 <h3 className="text-xl font-semibold text-gray-100 mb-2">Em Construção</h3>
@@ -264,14 +329,23 @@ export default function DashboardPage() {
           isOpen={showBankUpload}
           onClose={() => setShowBankUpload(false)}
           onTransactionsImported={handleTransactionsImported}
+          onFutureTransactionsImported={handleFutureTransactionsImported}
         />
 
-        {/* Modal de edição */}
+        {/* Modal de edição de transações normais */}
         <EditTransactionModal
           transaction={editingTransaction}
           isOpen={!!editingTransaction}
           onClose={() => setEditingTransaction(null)}
           onSave={handleSaveTransaction}
+        />
+
+        {/* Modal de edição de transações futuras */}
+        <EditFutureTransactionModal
+          transaction={editingFutureTransaction}
+          isOpen={!!editingFutureTransaction}
+          onClose={() => setEditingFutureTransaction(null)}
+          onSave={handleSaveFutureTransaction}
         />
       </div>
     </div>

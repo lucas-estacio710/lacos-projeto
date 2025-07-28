@@ -158,7 +158,7 @@ export function OverviewTab({ transactions, onEditTransaction }: OverviewTabProp
         )}
 
         <div className="bg-gradient-to-r from-purple-600 to-blue-600 text-white p-4 rounded-lg mt-6 shadow-lg">
-          <h4 className="font-bold text-lg mb-3">💎 Resumo Master</h4>
+          <h4 className="font-bold text-lg mb-3">💎 Resumo Total</h4>
           <div className="space-y-2">
             <div className="flex justify-between items-center">
               <span>Saldo PJ:</span>

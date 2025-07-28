@@ -30,7 +30,6 @@ export interface FutureTransaction {
   parcela_total: number;
   estabelecimento: string;
   status: 'projected' | 'confirmed' | 'paid';
-  conta?: string; // Adicionando campo conta que pode ser usado
 }
 
 export interface CategoryData {
@@ -46,8 +45,8 @@ export interface Categories {
 export interface BankUploadProps {
   isOpen: boolean;
   onClose: () => void;
-  onTransactionsImported: (transactions: Transaction[]) => Promise<{ success: boolean; stats?: { total: number; added: number; duplicates: number } } | void>;
-  onFutureTransactionsImported?: (futureTransactions: FutureTransaction[], referenceMes: string) => Promise<{ success: boolean; stats?: { total: number; added: number; duplicates: number } } | void>;
+  onTransactionsImported: (transactions: Transaction[]) => void;
+  onFutureTransactionsImported?: (futureTransactions: FutureTransaction[], referenceMes: string) => void;
 }
 
 export interface ParsedTransaction {

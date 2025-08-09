@@ -61,7 +61,7 @@ export function EditFutureTransactionModal({ transaction, isOpen, onClose, onSav
     switch(account) {
       case 'PJ': return categoriesPJ;
       case 'PF': return categoriesPF;
-      case 'CONC': return categoriesCONC;
+      case 'CONC.': return categoriesCONC;
       default: return {};
     }
   };
@@ -150,7 +150,7 @@ export function EditFutureTransactionModal({ transaction, isOpen, onClose, onSav
                 <option value="">Selecione...</option>
                 <option value="PF">PF - Pessoa Física</option>
                 <option value="PJ">PJ - Pessoa Jurídica</option>
-                <option value="CONC">CONC - Conciliação</option>
+                <option value="CONC.">CONC - Conciliação</option>
               </select>
             </div>
             

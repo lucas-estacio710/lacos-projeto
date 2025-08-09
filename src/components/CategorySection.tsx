@@ -114,7 +114,9 @@ export function CategorySection({
 
   const isExpanded = expandedCategory[`${tabKey}-${categoryName}`];
   const categoryTotal = transactions.reduce((sum, t) => sum + t.valor, 0);
-  const isRevenue = categoryData.color === 'green';
+ const isRevenue = categoryData.color === 'green';
+  const isNeutral = categoryData.color === 'blue';
+  const isPositive = categoryTotal >= 0;
   
   const subcategoryGroups: Record<string, Transaction[]> = {};
   
@@ -155,9 +157,16 @@ export function CategorySection({
         </div>
         <div className="flex items-center gap-2">
           {transactions.length > 0 ? (
-            <span className={`font-bold ${isRevenue ? 'text-green-400' : 'text-red-400'}`}>
-              {isRevenue ? '+' : '-'} R$ {formatCurrency(Math.abs(categoryTotal))}
-            </span>
+            <span className={`font-bold ${
+              isNeutral 
+                ? (isPositive ? 'text-green-400' : 'text-red-400')
+                : (isRevenue ? 'text-green-400' : 'text-red-400')
+            }`}>
+  {isNeutral 
+    ? (isPositive ? '+' : '-') 
+    : (isRevenue ? '+' : '-')
+  } R$ {formatCurrency(Math.abs(categoryTotal))}
+</span>
           ) : (
             <span className="text-gray-500 text-sm">R$ 0,00</span>
           )}

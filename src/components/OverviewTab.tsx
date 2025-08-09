@@ -54,7 +54,7 @@ export function OverviewTab({ transactions, onEditTransaction }: OverviewTabProp
   const classifiedTransactions = filteredByMonth.filter(t => t.realizado !== 'p');
   const pfTransactions = classifiedTransactions.filter(t => t.conta === 'PF');
   const pjTransactions = classifiedTransactions.filter(t => t.conta === 'PJ');
-  const concTransactions = classifiedTransactions.filter(t => t.conta === 'CONC');
+  const concTransactions = classifiedTransactions.filter(t => t.conta === 'CONC.');
 
   return (
     <>
@@ -140,7 +140,7 @@ export function OverviewTab({ transactions, onEditTransaction }: OverviewTabProp
             </div>
             {Object.entries(categoriesCONC).map(([categoryName, categoryData]) => {
               const categoryTransactions = getFilteredTransactions().filter(t => 
-                t.conta === 'CONC' && t.categoria === categoryName && t.realizado !== 'p'
+                t.conta === 'CONC.' && t.categoria === categoryName && t.realizado !== 'p'
               );
               return (
                 <CategorySection

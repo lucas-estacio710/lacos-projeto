@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { Upload } from 'lucide-react';
 import { Transaction, BankType, FutureTransaction } from '@/types';
 import { formatMonth } from '@/lib/utils';
+import * as XLSX from 'xlsx';
 
 interface BankUploadProps {
   isOpen: boolean;
@@ -319,6 +320,67 @@ export function BankUpload({ isOpen, onClose, onTransactionsImported, onFutureTr
       const importedTransactions: Transaction[] = [];
       let processedLines = 0;
       
+      if (selectedBank === 'TON') {
+        // Processar arquivo Excel da TON
+        try {
+          const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+          const sheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[sheetName];
+          const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+          
+          console.log(`=== IMPORTAÇÃO TON ===`);
+          console.log('Total de linhas no arquivo:', data.length);
+          
+          for (let i = 1; i < data.length; i++) {
+          const row = data[i] as any[];
+            if (!row || row.length < 6) continue;
+            
+            processedLines++;
+            
+            const dataStr = (row as any[])[0] as string;
+            const valorStr = (row as any[])[1] as string;
+            const tipoStr = (row as any[])[2] as string;
+            const identificador = (row as any[])[4] as string;
+            const descricao = (row as any[])[5] as string;
+            
+            if (!dataStr || !valorStr || !descricao) continue;
+            
+            // Converter data DD-MM-YYYY para DD/MM/YYYY
+            const [day, month, year] = dataStr.split('-');
+            const dataBR = `${day}/${month}/${year}`;
+            
+            // Parsear valor
+            const valor = parseValorBR(valorStr);
+            if (isNaN(valor)) continue;
+            
+            const id = generateID('TON', dataBR, descricao, valor);
+            const mes = generateMonth(dataBR);
+            const dataFormatted = convertDateFormat(dataBR);
+            
+            const transaction: Transaction = {
+              id,
+              mes,
+              data: dataFormatted,
+              descricao_origem: descricao,
+              subtipo: '',
+              categoria: '',
+              descricao: descricao,
+              valor,
+              origem: 'TON',
+              cc: 'TON',
+              realizado: 'p',
+              conta: ''
+            };
+            
+            importedTransactions.push(transaction);
+          }
+        } catch (tonError) {
+          console.error('Erro ao processar TON:', tonError);
+          alert('❌ Erro ao processar arquivo da TON. Verifique se é um arquivo Excel válido.');
+          return;
+        }
+      } 
+
       if (selectedBank === 'Inter') {
         // Processar arquivo do Inter (código existente)
         if (lines.length < 7) {
@@ -536,9 +598,10 @@ export function BankUpload({ isOpen, onClose, onTransactionsImported, onFutureTr
                 onChange={(e) => setSelectedBank(e.target.value as BankType)}
                 className="w-full p-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-100"
               >
-                <option value="Inter">🟠 Inter</option>
-                <option value="BB">🟡 Banco do Brasil</option>
-                <option value="Nubank">🟣 Nubank (Fatura)</option>
+                <option value="Inter">🟠Inter</option>
+                <option value="BB">🟡Banco do Brasil</option>
+                <option value="Nubank">🟣Nubank (Fatura)</option>
+                <option value="TON">🟢Ton</option>
               </select>
             </div>
 
@@ -593,6 +656,18 @@ export function BankUpload({ isOpen, onClose, onTransactionsImported, onFutureTr
               </div>
             )}
             
+            {selectedBank === 'TON' && (
+            <div className="bg-green-900 p-3 rounded-lg border border-green-700">
+              <h4 className="font-medium text-green-100 mb-2">📋 Formato TON</h4>
+              <ul className="text-sm text-green-200 space-y-1">
+                <li>• Arquivo Excel (.xlsx)</li>
+                <li>• Colunas: Data, Valor, Tipo, Status, Identificador, Descrição</li>
+                <li>• Data: DD-MM-YYYY</li>
+                <li>• Valor: R$ formato brasileiro</li>
+              </ul>
+            </div>
+          )}
+
             <div className="bg-blue-900 p-3 rounded-lg border border-blue-700">
               <h4 className="font-medium text-blue-100 mb-2">🔒 Sistema Inteligente</h4>
               <ul className="text-sm text-blue-200 space-y-1">

@@ -185,7 +185,7 @@ export function CartoesTab({ futureTransactions, onEditFutureTransaction }: Cart
       </div>
 
       {/* Sistema hierárquico por conta: PJ > PF > CONC */}
-      {(['PJ', 'PF', 'CONC'] as const).map(conta => {
+      {(['PJ', 'PF', 'CONC.'] as const).map(conta => {
         const transacoesConta = transacoesClassificadas.filter(t => {
           // Buscar conta baseada na categoria
           const categories = getCategoriesForAccount(conta);
@@ -195,10 +195,10 @@ export function CartoesTab({ futureTransactions, onEditFutureTransaction }: Cart
         if (transacoesConta.length === 0) return null;
 
         const totalConta = transacoesConta.reduce((sum, t) => sum + Math.abs(t.valor), 0);
-        const contaLabels: Record<'PJ' | 'PF' | 'CONC', { title: string; icon: string; color: string }> = {
+        const contaLabels: Record<'PJ' | 'PF' | 'CONC.', { title: string; icon: string; color: string }> = {
           'PJ': { title: 'Gastos PJ', icon: '🏢', color: 'blue' },
           'PF': { title: 'Gastos PF', icon: '👤', color: 'green' },
-          'CONC': { title: 'Gastos CONC', icon: '🔄', color: 'purple' }
+          'CONC.': { title: 'Gastos CONC.', icon: '🔄', color: 'purple' }
         };
 
         // Agrupar hierarquicamente por categoria > subtipo

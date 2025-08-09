@@ -232,6 +232,110 @@ export function useTransactions() {
     }
   };
 
+  // Dividir uma transação em múltiplas partes
+  const splitTransaction = async (originalTransaction: Transaction, parts: Array<{
+    categoria: string;
+    subtipo: string;
+    descricao: string;
+    valor: number;
+  }>) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error('Usuário não autenticado');
+      }
+
+      console.log('🔄 Iniciando divisão da transação:', originalTransaction.id);
+
+      // Função para determinar a conta automaticamente
+      const getAccountForTransaction = (transaction: Transaction): string => {
+        if (transaction.descricao_origem?.toLowerCase().includes('pix') || 
+            transaction.descricao_origem?.toLowerCase().includes('transferencia')) {
+          return 'PJ';
+        }
+        return 'PF';
+      };
+
+      // ETAPA 1: Deletar transação original
+      const { error: deleteError } = await supabase
+        .from('transactions')
+        .delete()
+        .eq('id', originalTransaction.id)
+        .eq('user_id', user.id);
+
+      if (deleteError) {
+        throw deleteError;
+      }
+
+      console.log('✅ Transação original deletada');
+
+      // ETAPA 2: Criar novas transações divididas
+      const account = getAccountForTransaction(originalTransaction);
+      const newTransactions = parts.map((part, index) => ({
+        id: `${originalTransaction.id}-${index + 1}`,
+        user_id: user.id,
+        mes: originalTransaction.mes,
+        data: originalTransaction.data,
+        descricao_origem: originalTransaction.descricao_origem,
+        subtipo: part.subtipo,
+        categoria: part.categoria,
+        descricao: part.descricao,
+        valor: part.valor,
+        origem: originalTransaction.origem,
+        cc: originalTransaction.cc,
+        realizado: 's', // Automaticamente marca como realizado
+        conta: account
+      }));
+
+      const { data: insertedTransactions, error: insertError } = await supabase
+        .from('transactions')
+        .insert(newTransactions)
+        .select();
+
+      if (insertError) {
+        throw insertError;
+      }
+
+      console.log('✅ Novas transações criadas:', insertedTransactions?.length);
+
+      // ETAPA 3: Atualizar estado local
+      setTransactions(prev => {
+        // Remove a transação original
+        const withoutOriginal = prev.filter(t => t.id !== originalTransaction.id);
+        
+        // Adiciona as novas transações
+        const newTransactionObjects: Transaction[] = newTransactions.map(nt => ({
+          id: nt.id,
+          mes: nt.mes,
+          data: nt.data,
+          descricao_origem: nt.descricao_origem,
+          subtipo: nt.subtipo,
+          categoria: nt.categoria,
+          descricao: nt.descricao,
+          valor: nt.valor,
+          origem: nt.origem,
+          cc: nt.cc,
+          realizado: nt.realizado,
+          conta: nt.conta
+        }));
+        
+        return [...withoutOriginal, ...newTransactionObjects];
+      });
+
+      console.log('✅ Divisão da transação concluída com sucesso');
+      
+      return {
+        success: true,
+        partsCreated: parts.length
+      };
+
+    } catch (err) {
+      console.error('❌ Erro ao dividir transação:', err);
+      setError(err instanceof Error ? err.message : 'Erro ao dividir transação');
+      throw err;
+    }
+  };
+
   // Carregar transações na inicialização
   useEffect(() => {
     loadTransactions();
@@ -253,6 +357,7 @@ export function useTransactions() {
     updateTransaction,
     deleteTransaction,
     clearAllTransactions,
+    splitTransaction,
     refreshTransactions: loadTransactions
   };
 }

@@ -7,9 +7,10 @@ interface EditTransactionModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (transaction: Transaction) => void;
+  onSplit?: (transaction: Transaction) => void; // Nova prop para divisão
 }
 
-export function EditTransactionModal({ transaction, isOpen, onClose, onSave }: EditTransactionModalProps) {
+export function EditTransactionModal({ transaction, isOpen, onClose, onSave, onSplit }: EditTransactionModalProps) {
   const [editForm, setEditForm] = useState<Partial<Transaction>>({});
 
   useEffect(() => {
@@ -45,7 +46,7 @@ export function EditTransactionModal({ transaction, isOpen, onClose, onSave }: E
     switch(account) {
       case 'PJ': return categoriesPJ;
       case 'PF': return categoriesPF;
-      case 'CONC': return categoriesCONC;
+      case 'CONC.': return categoriesCONC;
       default: return {};
     }
   };
@@ -107,7 +108,7 @@ export function EditTransactionModal({ transaction, isOpen, onClose, onSave }: E
                 <option value="">Selecione...</option>
                 <option value="PF">PF - Pessoa Física</option>
                 <option value="PJ">PJ - Pessoa Jurídica</option>
-                <option value="CONC">CONC - Conciliação</option>
+                <option value="CONC.">CONC - Conciliação</option>
               </select>
             </div>
             
@@ -154,6 +155,7 @@ export function EditTransactionModal({ transaction, isOpen, onClose, onSave }: E
             </div>
           </div>
           
+          {/* Botões */}
           <div className="flex gap-3 mt-6">
             <button
               onClick={onClose}
@@ -161,6 +163,22 @@ export function EditTransactionModal({ transaction, isOpen, onClose, onSave }: E
             >
               Cancelar
             </button>
+            
+            {/* Botão de divisão - apenas para transações não categorizadas */}
+            {onSplit && (!editForm.categoria || !editForm.subtipo) && (
+              <button
+                onClick={() => {
+                  onSplit(transaction);
+                  onClose();
+                }}
+                className="py-2 px-4 bg-orange-600 hover:bg-orange-500 text-white rounded transition-colors flex items-center gap-1"
+                title="Dividir em múltiplas transações"
+              >
+                <span>✂️</span>
+                <span className="hidden sm:inline">Dividir</span>
+              </button>
+            )}
+            
             <button
               onClick={handleSave}
               className="flex-1 py-2 px-4 bg-green-600 hover:bg-green-500 text-white rounded transition-colors"
@@ -173,4 +191,4 @@ export function EditTransactionModal({ transaction, isOpen, onClose, onSave }: E
       </div>
     </div>
   );
-}
+} 

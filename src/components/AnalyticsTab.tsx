@@ -31,7 +31,7 @@ export function AnalyticsTab({ transactions }: AnalyticsTabProps) {
     switch(account) {
       case 'PJ': return categoriesPJ;
       case 'PF': return categoriesPF;
-      case 'CONC': return categoriesCONC;
+      case 'CONC.': return categoriesCONC;
       default: return {};
     }
   };
@@ -84,7 +84,7 @@ export function AnalyticsTab({ transactions }: AnalyticsTabProps) {
             >
               <option value="PJ">PJ - Pessoa Jurídica</option>
               <option value="PF">PF - Pessoa Física</option>
-              <option value="CONC">CONC - Conciliação</option>
+              <option value="CONC.">CONC - Conciliação</option>
             </select>
           </div>
           <div>

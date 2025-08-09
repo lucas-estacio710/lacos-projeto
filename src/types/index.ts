@@ -66,8 +66,8 @@ export interface ImportResult {
   processedLines: number;
 }
 
-export type BankType = 'Inter' | 'BB' | 'Nubank';
-export type ContaType = 'PF' | 'PJ' | 'CONC';
+export type BankType = 'Inter' | 'BB' | 'Nubank' | 'TON';
+export type ContaType = 'PF' | 'PJ' | 'CONC.';
 export type RealizadoType = 's' | 'p'; // 's' = sim/realizado, 'p' = pendente
 
 export interface BankConfig {

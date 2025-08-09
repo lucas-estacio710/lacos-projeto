@@ -2,14 +2,14 @@ import { Categories } from '@/types';
 
 // Categorias PJ - ATUALIZADAS com seus dados reais
 export const categoriesPJ: Categories = {
-  'Receita de Planos': {
-    subtipos: ['P_INDIVIDUAL', 'P_COLETIVA'],
-    icon: '💳',
+  'Receita Nova': {
+    subtipos: ['REC. N. C. COL.','REC. N. C. IND.','REC. N. P. COL.','REC. N. P. IND.'],
+    icon: '💵',
     color: 'green'
   },
-  'Receita de Catálogo': {
-    subtipos: ['C_INDIVIDUAL', 'C_COLETIVA'],
-    icon: '📦',
+  'Receita Antiga': {
+    subtipos: ['REC. A. C. COL.','REC. A. C. IND.','REC. A. P. COL.','REC. A. P. IND.'],
+    icon: '💵',
     color: 'green'
   },
   'Custos Operacionais': {
@@ -102,13 +102,13 @@ export const getCategoriesForAccount = (account: string): Categories => {
   switch(account) {
     case 'PJ': return categoriesPJ;
     case 'PF': return categoriesPF;
-    case 'CONC': return categoriesCONC;
+    case 'CONC.': return categoriesCONC;
     default: return {};
   }
 };
 
 // Lista de todos os tipos de conta
-export const accountTypes = ['PF', 'PJ', 'CONC'] as const;
+export const accountTypes = ['PF', 'PJ', 'CONC.'] as const;
 
 // Lista de todos os status de realização
 export const realizadoTypes = ['s', 'p'] as const;

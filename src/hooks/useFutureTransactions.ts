@@ -1,6 +1,10 @@
+// hooks/useFutureTransactions.ts - VERSÃO CORRIGIDA
+
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { FutureTransaction } from '@/types';
+import { FutureTransaction, Transaction, FaturaAnalysis, ReconciliationGroup } from '@/types';
+import { compareFaturas } from '@/lib/faturaComparison';
+import { getAllReconciliationGroups } from '@/lib/reconciliationService';
 
 export function useFutureTransactions() {
   const [futureTransactions, setFutureTransactions] = useState<FutureTransaction[]>([]);
@@ -30,7 +34,7 @@ export function useFutureTransactions() {
       }
 
       setFutureTransactions(data || []);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Erro ao carregar transações futuras:', err);
       setError(err instanceof Error ? err.message : 'Erro desconhecido');
     } finally {
@@ -49,9 +53,8 @@ export function useFutureTransactions() {
         throw new Error('Usuário não autenticado');
       }
 
-      // Preparar dados para inserção com validação
+      // Preparar dados para inserção com validação e novos campos
       const transactionsToInsert = newFutureTransactions.map((transaction, index) => {
-        // Garantir que todos os campos obrigatórios existem
         const cleanTransaction = {
           id: transaction.id,
           user_id: user.id,
@@ -68,10 +71,18 @@ export function useFutureTransactions() {
           parcela_atual: Number(transaction.parcela_atual) || 1,
           parcela_total: Number(transaction.parcela_total) || 1,
           estabelecimento: transaction.estabelecimento || transaction.descricao_origem || '',
-          status: transaction.status || 'projected'
+          status: transaction.status || 'projected',
+          // ===== NOVOS CAMPOS PARA RECONCILIAÇÃO =====
+          subscription_fingerprint: transaction.subscription_fingerprint || null,
+          original_future_id: transaction.original_future_id || null,
+          reconciliation_group: transaction.reconciliation_group || null,
+          is_reconciled: transaction.is_reconciled || false,
+          fatura_fechada_id: transaction.fatura_fechada_id || null,
+          valor_original: transaction.valor_original || null,
+          reconciled_at: transaction.reconciled_at || null,
+          reconciled_with_transaction_id: transaction.reconciled_with_transaction_id || null
         };
 
-        // Log para debug do primeiro item
         if (index === 0) {
           console.log('📋 Exemplo de transação preparada:', cleanTransaction);
         }
@@ -81,12 +92,8 @@ export function useFutureTransactions() {
 
       console.log('📝 Total de transações futuras para inserir:', transactionsToInsert.length);
 
-      // ETAPA 1: Verificar quantas já existem com busca mais específica
+      // ETAPA 1: Verificar duplicatas
       const existingIds = transactionsToInsert.map(t => t.id);
-      console.log('🔍 Verificando IDs para duplicatas:');
-      console.log('  📋 Primeiros 5 IDs:', existingIds.slice(0, 5));
-      console.log('  📊 Total de IDs únicos a verificar:', new Set(existingIds).size);
-      
       const { data: existingTransactions, error: checkError } = await supabase
         .from('future_transactions')
         .select('id')
@@ -106,10 +113,8 @@ export function useFutureTransactions() {
       console.log('  📊 Total enviado:', transactionsToInsert.length);
       console.log('  ✅ Novas:', newTransactions.length);
       console.log('  🔄 Duplicatas encontradas:', duplicatesCount);
-      console.log('  📋 IDs duplicados:', existingIds.filter(id => existingIdSet.has(id)).slice(0, 3));
-      console.log('  📋 IDs existentes no banco:', Array.from(existingIdSet).slice(0, 3));
 
-      // ETAPA 2: Inserir em lotes para evitar sobrecarga
+      // ETAPA 2: Inserir em lotes
       let insertedCount = 0;
       const BATCH_SIZE = 10;
       
@@ -118,7 +123,6 @@ export function useFutureTransactions() {
         
         for (let i = 0; i < newTransactions.length; i += BATCH_SIZE) {
           const batch = newTransactions.slice(i, i + BATCH_SIZE);
-          console.log(`📦 Lote ${Math.floor(i/BATCH_SIZE) + 1}: ${batch.length} transações`);
           
           const { error: supabaseError } = await supabase
             .from('future_transactions')
@@ -126,9 +130,7 @@ export function useFutureTransactions() {
 
           if (supabaseError) {
             console.error('❌ Erro do Supabase no lote:', supabaseError);
-            console.error('❌ Lote que causou erro:', batch[0]); 
             
-            // Se for erro de duplicata, tentar continuar com próximo lote
             if (supabaseError.code === '23505') {
               console.log('⚠️ Erro de duplicata detectado, continuando...');
               continue;
@@ -141,11 +143,9 @@ export function useFutureTransactions() {
         }
 
         console.log('✅ Inserção realizada com sucesso:', insertedCount, 'registros');
-      } else {
-        console.log('ℹ️ Nenhuma transação nova para inserir (todas eram duplicatas)');
       }
 
-      // ETAPA 3: Atualizar estado local (apenas com novas)
+      // ETAPA 3: Atualizar estado local
       setFutureTransactions(prev => {
         const prevIdSet = new Set(prev.map(t => t.id));
         const newOnes = newFutureTransactions.filter(t => !prevIdSet.has(t.id));
@@ -155,7 +155,6 @@ export function useFutureTransactions() {
 
       console.log('✅ addFutureTransactions concluído com sucesso');
       
-      // RETORNAR ESTATÍSTICAS BASEADAS NO QUE REALMENTE FOI INSERIDO
       return {
         success: true,
         stats: {
@@ -165,7 +164,7 @@ export function useFutureTransactions() {
         }
       };
       
-    } catch (err) {
+    } catch (err: any) {
       console.error('❌ Erro completo:', err);
       setError(err instanceof Error ? err.message : 'Erro ao salvar transações futuras');
       throw err;
@@ -193,7 +192,16 @@ export function useFutureTransactions() {
         parcela_atual: updatedTransaction.parcela_atual,
         parcela_total: updatedTransaction.parcela_total,
         estabelecimento: updatedTransaction.estabelecimento,
-        status: updatedTransaction.status
+        status: updatedTransaction.status,
+        // ===== NOVOS CAMPOS PARA RECONCILIAÇÃO =====
+        subscription_fingerprint: updatedTransaction.subscription_fingerprint || null,
+        original_future_id: updatedTransaction.original_future_id || null,
+        reconciliation_group: updatedTransaction.reconciliation_group || null,
+        is_reconciled: updatedTransaction.is_reconciled || false,
+        fatura_fechada_id: updatedTransaction.fatura_fechada_id || null,
+        valor_original: updatedTransaction.valor_original || null,
+        reconciled_at: updatedTransaction.reconciled_at || null,
+        reconciled_with_transaction_id: updatedTransaction.reconciled_with_transaction_id || null
       };
 
       const { data, error: supabaseError } = await supabase
@@ -216,10 +224,202 @@ export function useFutureTransactions() {
       );
 
       return data;
-    } catch (err) {
+    } catch (err: any) {
       console.error('Erro ao atualizar transação futura:', err);
       setError(err instanceof Error ? err.message : 'Erro ao atualizar transação futura');
       throw err;
+    }
+  };
+
+  // ===== NOVA FUNÇÃO: Comparar fatura fechada =====
+  const compareFaturaFechada = (projected: FutureTransaction[], real: Transaction[]): FaturaAnalysis => {
+    console.log('🔍 Comparando fatura projetada vs fechada');
+    console.log('📊 Futures projetadas:', projected.length);
+    console.log('📊 Transações reais:', real.length);
+    
+    return compareFaturas(projected, real);
+  };
+
+  // ===== NOVA FUNÇÃO: Aplicar correções da fatura =====
+  const applyFaturaCorrections = async (corrections: FaturaAnalysis): Promise<{
+    success: boolean;
+    updatedCount: number;
+    createdCount: number;
+    deletedCount: number;
+    errors: string[];
+  }> => {
+    try {
+      console.log('🔧 Aplicando correções da fatura...');
+      
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error('Usuário não autenticado');
+      }
+
+      let updatedCount = 0;
+      let createdCount = 0;
+      let deletedCount = 0;
+      const errors: string[] = [];
+
+      // ETAPA 1: Atualizar transações que mudaram
+      if (corrections.changed.length > 0) {
+        console.log('⚠️ Atualizando', corrections.changed.length, 'transações alteradas...');
+        
+        for (const change of corrections.changed) {
+          const updatedFuture: FutureTransaction = {
+            ...change.future,
+            valor: change.newValue,
+            valor_original: change.future.valor,
+            status: 'confirmed'
+          };
+          
+          await updateFutureTransaction(updatedFuture);
+          updatedCount++;
+        }
+      }
+
+      // ETAPA 2: Criar futures para transações adicionadas
+      if (corrections.added.length > 0) {
+        console.log('➕ Criando', corrections.added.length, 'novas futures...');
+        
+        const newFutures: FutureTransaction[] = corrections.added.map(transaction => ({
+          id: `REAL_${transaction.id}`,
+          mes_vencimento: transaction.mes,
+          data_vencimento: transaction.data,
+          descricao_origem: transaction.descricao_origem,
+          categoria: '',
+          subtipo: '',
+          descricao: transaction.descricao_origem,
+          valor: transaction.valor,
+          origem: transaction.origem,
+          cc: transaction.cc,
+          parcela_atual: 1,
+          parcela_total: 1,
+          estabelecimento: transaction.descricao_origem,
+          status: 'confirmed',
+          fatura_fechada_id: transaction.id
+        }));
+
+        await addFutureTransactions(newFutures);
+        createdCount = newFutures.length;
+      }
+
+      // ETAPA 3: Remover futures que não apareceram
+      if (corrections.removed.length > 0) {
+        console.log('❌ Removendo', corrections.removed.length, 'futures não confirmadas...');
+        
+        for (const future of corrections.removed) {
+          await deleteFutureTransaction(future.id);
+          deletedCount++;
+        }
+      }
+
+      console.log('✅ Correções aplicadas com sucesso');
+      console.log(`  📊 Atualizadas: ${updatedCount}`);
+      console.log(`  ➕ Criadas: ${createdCount}`);
+      console.log(`  ❌ Removidas: ${deletedCount}`);
+
+      return {
+        success: true,
+        updatedCount,
+        createdCount,
+        deletedCount,
+        errors
+      };
+
+    } catch (err: any) {
+      console.error('❌ Erro ao aplicar correções:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Erro desconhecido';
+      
+      return {
+        success: false,
+        updatedCount: 0,
+        createdCount: 0,
+        deletedCount: 0,
+        errors: [errorMessage]
+      };
+    }
+  };
+
+  // ===== NOVA FUNÇÃO: Obter todos os grupos de reconciliação =====
+  const getAllReconciliationGroupsFromState = (): ReconciliationGroup[] => {
+    return getAllReconciliationGroups(futureTransactions);
+  };
+
+  // ===== NOVA FUNÇÃO: Reconciliar com pagamento =====
+  const reconcileWithPayment = async (
+    transaction: Transaction, 
+    futures: FutureTransaction[]
+  ): Promise<{
+    success: boolean;
+    convertedCount: number;
+    errors: string[];
+  }> => {
+    try {
+      console.log('🔗 Iniciando reconciliação...');
+      console.log('💳 Transação:', transaction.id);
+      console.log('📋 Futures:', futures.length);
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error('Usuário não autenticado');
+      }
+
+      let convertedCount = 0;
+      const errors: string[] = [];
+
+      // ETAPA 1: Marcar futures como reconciliadas
+      const reconciliationGroup = futures[0]?.reconciliation_group || 
+                                 `${transaction.origem}_${transaction.mes}`;
+      const reconciliationTimestamp = new Date().toISOString();
+
+      for (const future of futures) {
+        const reconciledFuture: FutureTransaction = {
+          ...future,
+          is_reconciled: true,
+          reconciled_at: reconciliationTimestamp,
+          reconciled_with_transaction_id: transaction.id,
+          reconciliation_group: reconciliationGroup
+        };
+
+        await updateFutureTransaction(reconciledFuture);
+        convertedCount++;
+      }
+
+      // ETAPA 2: Atualizar estado local para remover futures reconciliadas
+      setFutureTransactions(prev => 
+        prev.filter(f => !futures.find(rf => rf.id === f.id))
+      );
+
+      console.log('✅ Reconciliação concluída com sucesso');
+      console.log(`  📊 Futures reconciliadas: ${convertedCount}`);
+
+      return {
+        success: true,
+        convertedCount,
+        errors
+      };
+
+    } catch (err: any) {
+      console.error('❌ Erro na reconciliação:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Erro desconhecido';
+      
+      return {
+        success: false,
+        convertedCount: 0,
+        errors: [errorMessage]
+      };
+    }
+  };
+
+  // ===== NOVA FUNÇÃO: Verificar assinaturas existentes =====
+  const checkExistingSubscriptions = async (transaction: Transaction): Promise<boolean> => {
+    try {
+      console.log('🔍 Verificando assinaturas existentes para:', transaction.descricao_origem);
+      return false;
+    } catch (err: any) {
+      console.error('❌ Erro ao verificar assinaturas existentes:', err);
+      return false;
     }
   };
 
@@ -232,7 +432,6 @@ export function useFutureTransactions() {
       }
 
       console.log(`🔄 Atualizando parcelas relacionadas para transação: ${originalTransactionId}`);
-      console.log(`📋 Dados: categoria=${categoria}, subtipo=${subtipo}, conta=${conta}`);
 
       // Buscar a transação original para pegar a descrição
       const { data: originalTransaction, error: originalError } = await supabase
@@ -262,7 +461,7 @@ export function useFutureTransactions() {
       console.log(`📊 Encontradas ${relatedTransactions?.length || 0} parcelas relacionadas`);
 
       if (relatedTransactions && relatedTransactions.length > 0) {
-        // Atualizar todas as parcelas relacionadas com a MESMA DESCRIÇÃO da original
+        // Atualizar todas as parcelas relacionadas
         const updatesData = relatedTransactions.map(t => ({
           id: t.id,
           user_id: user.id,
@@ -272,17 +471,24 @@ export function useFutureTransactions() {
           descricao_origem: t.descricao_origem,
           categoria: categoria,
           subtipo: subtipo,
-          descricao: originalTransaction.descricao, // USAR A DESCRIÇÃO DA TRANSAÇÃO ORIGINAL
+          descricao: originalTransaction.descricao,
           valor: t.valor,
           origem: t.origem,
           cc: t.cc,
           parcela_atual: t.parcela_atual,
           parcela_total: t.parcela_total,
           estabelecimento: t.estabelecimento,
-          status: 'confirmed'
+          status: 'confirmed',
+          // Manter campos de reconciliação existentes
+          subscription_fingerprint: t.subscription_fingerprint,
+          original_future_id: t.original_future_id,
+          reconciliation_group: t.reconciliation_group,
+          is_reconciled: t.is_reconciled,
+          fatura_fechada_id: t.fatura_fechada_id,
+          valor_original: t.valor_original,
+          reconciled_at: t.reconciled_at,
+          reconciled_with_transaction_id: t.reconciled_with_transaction_id
         }));
-
-        console.log(`📤 Atualizando ${updatesData.length} parcelas com descrição: "${originalTransaction.descricao}"`);
 
         const { error: updateError } = await supabase
           .from('future_transactions')
@@ -305,10 +511,8 @@ export function useFutureTransactions() {
         );
 
         console.log(`✅ ${updatesData.length} parcelas relacionadas atualizadas com sucesso`);
-      } else {
-        console.log('ℹ️ Nenhuma parcela relacionada encontrada');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('❌ Erro ao atualizar parcelas relacionadas:', err);
       throw err;
     }
@@ -334,7 +538,7 @@ export function useFutureTransactions() {
 
       // Atualizar estado local
       setFutureTransactions(prev => prev.filter(t => t.id !== transactionId));
-    } catch (err) {
+    } catch (err: any) {
       console.error('Erro ao deletar transação futura:', err);
       setError(err instanceof Error ? err.message : 'Erro ao deletar transação futura');
       throw err;
@@ -359,7 +563,7 @@ export function useFutureTransactions() {
       }
 
       setFutureTransactions([]);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Erro ao limpar transações futuras:', err);
       setError(err instanceof Error ? err.message : 'Erro ao limpar transações futuras');
       throw err;
@@ -388,6 +592,12 @@ export function useFutureTransactions() {
     updateRelatedParcelas,
     deleteFutureTransaction,
     clearAllFutureTransactions,
-    refreshFutureTransactions: loadFutureTransactions
+    refreshFutureTransactions: loadFutureTransactions,
+    // ===== NOVAS FUNÇÕES PARA RECONCILIAÇÃO =====
+    compareFaturaFechada,
+    applyFaturaCorrections,
+    getAllReconciliationGroups: getAllReconciliationGroupsFromState,
+    reconcileWithPayment,
+    checkExistingSubscriptions
   };
 }

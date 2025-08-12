@@ -1,3 +1,5 @@
+// hooks/useTransactions.ts - VERSÃO ATUALIZADA COM RECONCILIAÇÃO
+
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Transaction } from '@/types';
@@ -39,97 +41,102 @@ export function useTransactions() {
   };
 
   // Adicionar múltiplas transações
-    const addTransactions = async (newTransactions: Transaction[]) => {
-      try {
-        console.log('🔄 Iniciando addTransactions com:', newTransactions.length, 'transações');
-        
-        const { data: { user } } = await supabase.auth.getUser();
-        
-        if (!user) {
-          throw new Error('Usuário não autenticado');
-        }
-
-        // Preparar dados para inserção
-        const transactionsToInsert = newTransactions.map(transaction => ({
-          id: transaction.id,
-          user_id: user.id,
-          mes: transaction.mes,
-          data: transaction.data,
-          descricao_origem: transaction.descricao_origem,
-          subtipo: transaction.subtipo,
-          categoria: transaction.categoria,
-          descricao: transaction.descricao,
-          valor: transaction.valor,
-          origem: transaction.origem,
-          cc: transaction.cc,
-          realizado: transaction.realizado,
-          conta: transaction.conta
-        }));
-
-        console.log('📝 Total de transações para inserir:', transactionsToInsert.length);
-
-        // ETAPA 1: Verificar quantas já existem (para contar duplicatas)
-        const existingIds = transactionsToInsert.map(t => t.id);
-        const { data: existingTransactions, error: checkError } = await supabase
-          .from('transactions')
-          .select('id')
-          .eq('user_id', user.id)
-          .in('id', existingIds);
-
-        if (checkError) {
-          console.error('❌ Erro ao verificar duplicatas:', checkError);
-          throw checkError;
-        }
-
-        const existingIdSet = new Set(existingTransactions?.map(t => t.id) || []);
-        const duplicatesCount = existingIds.filter(id => existingIdSet.has(id)).length;
-        const newCount = transactionsToInsert.length - duplicatesCount;
-
-        console.log('🔍 Análise de duplicatas:');
-        console.log('  📊 Total enviado:', transactionsToInsert.length);
-        console.log('  ✅ Novas:', newCount);
-        console.log('  🔄 Duplicatas:', duplicatesCount);
-
-        // ETAPA 2: Inserir com upsert (funciona independente de duplicatas)
-        const { data: _, error: supabaseError } = await supabase
-          .from('transactions')
-          .upsert(transactionsToInsert, { 
-            onConflict: 'id',
-            ignoreDuplicates: false 
-          })
-          .select();
-
-        if (supabaseError) {
-          console.error('❌ Erro do Supabase:', supabaseError);
-          throw supabaseError;
-        }
-
-        // ETAPA 3: Atualizar estado local (apenas com novas)
-        setTransactions(prev => {
-          const prevIdSet = new Set(prev.map(t => t.id));
-          const newOnes = newTransactions.filter(t => !prevIdSet.has(t.id));
-          console.log('✅ Adicionando ao estado local:', newOnes.length, 'novas transações');
-          return [...prev, ...newOnes];
-        });
-
-        console.log('✅ addTransactions concluído com sucesso');
-        
-        // RETORNAR ESTATÍSTICAS SIMPLES E CONFIÁVEIS
-        return {
-          success: true,
-          stats: {
-            total: transactionsToInsert.length,
-            added: newCount,
-            duplicates: duplicatesCount
-          }
-        };
-        
-      } catch (err) {
-        console.error('❌ Erro completo:', err);
-        setError(err instanceof Error ? err.message : 'Erro ao salvar transações');
-        throw err;
+  const addTransactions = async (newTransactions: Transaction[]) => {
+    try {
+      console.log('🔄 Iniciando addTransactions com:', newTransactions.length, 'transações');
+      
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        throw new Error('Usuário não autenticado');
       }
-    };
+
+      // Preparar dados para inserção
+      const transactionsToInsert = newTransactions.map(transaction => ({
+        id: transaction.id,
+        user_id: user.id,
+        mes: transaction.mes,
+        data: transaction.data,
+        descricao_origem: transaction.descricao_origem,
+        subtipo: transaction.subtipo,
+        categoria: transaction.categoria,
+        descricao: transaction.descricao,
+        valor: transaction.valor,
+        origem: transaction.origem,
+        cc: transaction.cc,
+        realizado: transaction.realizado,
+        conta: transaction.conta,
+        // ===== NOVOS CAMPOS PARA RECONCILIAÇÃO =====
+        linked_future_group: transaction.linked_future_group || null,
+        is_from_reconciliation: transaction.is_from_reconciliation || false,
+        future_subscription_id: transaction.future_subscription_id || null,
+        reconciliation_metadata: transaction.reconciliation_metadata || null
+      }));
+
+      console.log('📝 Total de transações para inserir:', transactionsToInsert.length);
+
+      // ETAPA 1: Verificar quantas já existem (para contar duplicatas)
+      const existingIds = transactionsToInsert.map(t => t.id);
+      const { data: existingTransactions, error: checkError } = await supabase
+        .from('transactions')
+        .select('id')
+        .eq('user_id', user.id)
+        .in('id', existingIds);
+
+      if (checkError) {
+        console.error('❌ Erro ao verificar duplicatas:', checkError);
+        throw checkError;
+      }
+
+      const existingIdSet = new Set(existingTransactions?.map(t => t.id) || []);
+      const duplicatesCount = existingIds.filter(id => existingIdSet.has(id)).length;
+      const newCount = transactionsToInsert.length - duplicatesCount;
+
+      console.log('🔍 Análise de duplicatas:');
+      console.log('  📊 Total enviado:', transactionsToInsert.length);
+      console.log('  ✅ Novas:', newCount);
+      console.log('  🔄 Duplicatas:', duplicatesCount);
+
+      // ETAPA 2: Inserir com upsert (funciona independente de duplicatas)
+      const { data: _, error: supabaseError } = await supabase
+        .from('transactions')
+        .upsert(transactionsToInsert, { 
+          onConflict: 'id',
+          ignoreDuplicates: false 
+        })
+        .select();
+
+      if (supabaseError) {
+        console.error('❌ Erro do Supabase:', supabaseError);
+        throw supabaseError;
+      }
+
+      // ETAPA 3: Atualizar estado local (apenas com novas)
+      setTransactions(prev => {
+        const prevIdSet = new Set(prev.map(t => t.id));
+        const newOnes = newTransactions.filter(t => !prevIdSet.has(t.id));
+        console.log('✅ Adicionando ao estado local:', newOnes.length, 'novas transações');
+        return [...prev, ...newOnes];
+      });
+
+      console.log('✅ addTransactions concluído com sucesso');
+      
+      // RETORNAR ESTATÍSTICAS SIMPLES E CONFIÁVEIS
+      return {
+        success: true,
+        stats: {
+          total: transactionsToInsert.length,
+          added: newCount,
+          duplicates: duplicatesCount
+        }
+      };
+      
+    } catch (err) {
+      console.error('❌ Erro completo:', err);
+      setError(err instanceof Error ? err.message : 'Erro ao salvar transações');
+      throw err;
+    }
+  };
 
   // Atualizar uma transação específica
   const updateTransaction = async (updatedTransaction: Transaction): Promise<Transaction | null> => {
@@ -150,7 +157,12 @@ export function useTransactions() {
         origem: updatedTransaction.origem,
         cc: updatedTransaction.cc,
         realizado: updatedTransaction.realizado,
-        conta: updatedTransaction.conta
+        conta: updatedTransaction.conta,
+        // ===== NOVOS CAMPOS PARA RECONCILIAÇÃO =====
+        linked_future_group: updatedTransaction.linked_future_group || null,
+        is_from_reconciliation: updatedTransaction.is_from_reconciliation || false,
+        future_subscription_id: updatedTransaction.future_subscription_id || null,
+        reconciliation_metadata: updatedTransaction.reconciliation_metadata || null
       };
 
       const { data, error: supabaseError } = await supabase
@@ -176,6 +188,42 @@ export function useTransactions() {
     } catch (err) {
       console.error('Erro ao atualizar transação:', err);
       setError(err instanceof Error ? err.message : 'Erro ao atualizar transação');
+      throw err;
+    }
+  };
+
+  // ===== NOVA FUNÇÃO: Marcar transação como reconciliada =====
+  const markAsReconciled = async (transaction: Transaction, futureGroup: string) => {
+    try {
+      console.log('🔗 Marcando transação como reconciliada:', transaction.id);
+      console.log('📋 Grupo de futures:', futureGroup);
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error('Usuário não autenticado');
+      }
+
+      const reconciliationMetadata = {
+        reconciled_at: new Date().toISOString(),
+        future_group: futureGroup,
+        reconciled_by: 'manual'
+      };
+
+      const updatedTransaction: Transaction = {
+        ...transaction,
+        linked_future_group: futureGroup,
+        is_from_reconciliation: true,
+        reconciliation_metadata: JSON.stringify(reconciliationMetadata),
+        realizado: 's' // Marcar como realizado
+      };
+
+      await updateTransaction(updatedTransaction);
+
+      console.log('✅ Transação marcada como reconciliada');
+      return { success: true };
+
+    } catch (err) {
+      console.error('❌ Erro ao marcar como reconciliada:', err);
       throw err;
     }
   };
@@ -284,7 +332,12 @@ export function useTransactions() {
         origem: originalTransaction.origem,
         cc: originalTransaction.cc,
         realizado: 's', // Automaticamente marca como realizado
-        conta: account
+        conta: account,
+        // Manter dados de reconciliação se existirem
+        linked_future_group: originalTransaction.linked_future_group,
+        is_from_reconciliation: originalTransaction.is_from_reconciliation,
+        future_subscription_id: originalTransaction.future_subscription_id,
+        reconciliation_metadata: originalTransaction.reconciliation_metadata
       }));
 
       const { data: insertedTransactions, error: insertError } = await supabase
@@ -316,7 +369,11 @@ export function useTransactions() {
           origem: nt.origem,
           cc: nt.cc,
           realizado: nt.realizado,
-          conta: nt.conta
+          conta: nt.conta,
+          linked_future_group: nt.linked_future_group,
+          is_from_reconciliation: nt.is_from_reconciliation,
+          future_subscription_id: nt.future_subscription_id,
+          reconciliation_metadata: nt.reconciliation_metadata
         }));
         
         return [...withoutOriginal, ...newTransactionObjects];
@@ -358,6 +415,7 @@ export function useTransactions() {
     deleteTransaction,
     clearAllTransactions,
     splitTransaction,
+    markAsReconciled, // ===== NOVA FUNÇÃO =====
     refreshTransactions: loadTransactions
   };
 }

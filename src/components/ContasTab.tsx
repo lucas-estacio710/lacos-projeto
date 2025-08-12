@@ -1,6 +1,7 @@
 import React from 'react';
 import { Transaction } from '@/types';
 
+
 interface ContasTabProps {
   transactions: Transaction[];
 }

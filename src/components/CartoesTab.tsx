@@ -1,16 +1,39 @@
 import React, { useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
-import { FutureTransaction } from '@/types';
-import { UnclassifiedCardsSection } from '@/components/UnclassifiedCardsSection';
+import { FutureTransaction, Transaction } from '@/types';
+import { EnhancedUnclassifiedSection } from '@/components/EnhancedUnclassifiedSection';
 import { formatCurrency, formatMonth } from '@/lib/utils';
 import { getCategoriesForAccount } from '@/lib/categories';
+
 
 interface CartoesTabProps {
   futureTransactions: FutureTransaction[];
   onEditFutureTransaction: (transaction: FutureTransaction) => void;
+  onApplyQuickClassification?: (transactionId: string, classification: any) => Promise<void>;
+  onApplyBatchClassification?: (classifications: Array<{
+    id: string;
+    conta: string;
+    categoria: string;
+    subtipo: string;
+    descricao: string;
+  }>) => Promise<void>;
 }
 
-export function CartoesTab({ futureTransactions, onEditFutureTransaction }: CartoesTabProps) {
+// Função wrapper para compatibilidade com EnhancedUnclassifiedSection
+const handleEditTransactionWrapper = (
+  transaction: Transaction | FutureTransaction, 
+  onEditFutureTransaction: (transaction: FutureTransaction) => void
+) => {
+  // Como estamos no contexto de cartões, sabemos que é FutureTransaction
+  onEditFutureTransaction(transaction as FutureTransaction);
+};
+
+export function CartoesTab({ 
+  futureTransactions, 
+  onEditFutureTransaction,
+  onApplyQuickClassification,
+  onApplyBatchClassification
+}: CartoesTabProps) {
   const [selectedCartao, setSelectedCartao] = useState('todos');
   const [selectedMes, setSelectedMes] = useState('todos');
   const [searchTerm, setSearchTerm] = useState('');
@@ -159,10 +182,14 @@ export function CartoesTab({ futureTransactions, onEditFutureTransaction }: Cart
         </div>
       </div>
 
-      {/* Seção de não classificados */}
-      <UnclassifiedCardsSection 
-        futureTransactions={filteredTransactions}
-        onEditTransaction={onEditFutureTransaction}
+      {/* Seção de não classificados - NOVA VERSÃO INTELIGENTE */}
+      <EnhancedUnclassifiedSection
+        transactions={filteredTransactions}
+        historicTransactions={[]} // Future transactions não tem histórico ainda
+        onEditTransaction={(transaction) => handleEditTransactionWrapper(transaction, onEditFutureTransaction)}
+        onApplyQuickClassification={onApplyQuickClassification}
+        onApplyBatchClassification={onApplyBatchClassification}
+        type="futures"
       />
 
       {/* Resumo de totais */}
@@ -509,6 +536,24 @@ export function CartoesTab({ futureTransactions, onEditFutureTransaction }: Cart
               : 'Importe uma fatura do Nubank para começar!'
             }
           </p>
+        </div>
+      )}
+
+      {/* Indicador de sistema de classificação inteligente */}
+      {(onApplyQuickClassification || onApplyBatchClassification) && (
+        <div className="bg-blue-900 border border-blue-700 rounded-lg p-4">
+          <div className="flex items-center gap-3">
+            <span className="text-blue-400 text-2xl">🤖</span>
+            <div>
+              <h4 className="text-blue-100 font-medium">Classificação Inteligente para Cartões</h4>
+              <p className="text-blue-300 text-sm">
+                Sistema com botões rápidos e classificação em lote para transações futuras
+              </p>
+              <p className="text-blue-400 text-xs mt-1">
+                💡 Use botões rápidos (🛒🍽️🚗) ou classificação em lote (⚡) para acelerar
+              </p>
+            </div>
+          </div>
         </div>
       )}
     </div>

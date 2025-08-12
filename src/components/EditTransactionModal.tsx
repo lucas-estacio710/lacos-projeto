@@ -1,3 +1,5 @@
+// components/EditTransactionModal.tsx - VERSÃO ATUALIZADA COM RECONCILIAÇÃO
+
 import React, { useState, useEffect } from 'react';
 import { Transaction } from '@/types';
 import { categoriesPJ, categoriesPF, categoriesCONC } from '@/lib/categories';
@@ -7,10 +9,20 @@ interface EditTransactionModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (transaction: Transaction) => void;
-  onSplit?: (transaction: Transaction) => void; // Nova prop para divisão
+  onSplit?: (transaction: Transaction) => void; // Função para divisão
+  onReconcile?: (transaction: Transaction) => void; // ===== NOVA PROP PARA RECONCILIAÇÃO =====
+  availableGroupsCount?: number; // Contador de grupos disponíveis
 }
 
-export function EditTransactionModal({ transaction, isOpen, onClose, onSave, onSplit }: EditTransactionModalProps) {
+export function EditTransactionModal({ 
+  transaction, 
+  isOpen, 
+  onClose, 
+  onSave, 
+  onSplit, 
+  onReconcile,
+  availableGroupsCount = 0
+}: EditTransactionModalProps) {
   const [editForm, setEditForm] = useState<Partial<Transaction>>({});
 
   useEffect(() => {
@@ -30,7 +42,10 @@ export function EditTransactionModal({ transaction, isOpen, onClose, onSave, onS
         valor: transaction.valor,
         origem: transaction.origem,
         cc: transaction.cc,
-        realizado: transaction.realizado
+        realizado: transaction.realizado,
+        // Campos de reconciliação
+        linked_future_group: transaction.linked_future_group,
+        is_from_reconciliation: transaction.is_from_reconciliation
       });
     }
   }, [transaction]);
@@ -66,7 +81,25 @@ export function EditTransactionModal({ transaction, isOpen, onClose, onSave, onS
     }
   };
 
+  const handleReconcile = () => {
+    if (transaction && onReconcile) {
+      onReconcile(transaction);
+      onClose();
+    }
+  };
+
   if (!isOpen || !transaction) return null;
+
+  // Verificar se pode ser reconciliado
+  const canReconcile = onReconcile && 
+                      availableGroupsCount > 0 && 
+                      !transaction.is_from_reconciliation &&
+                      transaction.realizado === 'p'; // Apenas transações não classificadas
+
+  // Verificar se pode ser dividido
+  const canSplit = onSplit && 
+                  (!editForm.categoria || !editForm.subtipo) &&
+                  !transaction.is_from_reconciliation;
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -74,6 +107,7 @@ export function EditTransactionModal({ transaction, isOpen, onClose, onSave, onS
         <div className="p-6">
           <h3 className="text-xl font-semibold text-gray-100 mb-4">Editar Transação</h3>
           
+          {/* Informações da transação */}
           <div className="space-y-3 mb-6">
             <div>
               <label className="text-sm text-gray-400">Data</label>
@@ -95,8 +129,24 @@ export function EditTransactionModal({ transaction, isOpen, onClose, onSave, onS
                 <p className="text-gray-200">{editForm.origem || 'N/A'}</p>
               </div>
             </div>
+
+            {/* Indicador de reconciliação */}
+            {transaction.is_from_reconciliation && (
+              <div className="bg-blue-900 border border-blue-700 rounded p-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-blue-400">🔗</span>
+                  <div>
+                    <p className="text-blue-100 text-sm font-medium">Transação Reconciliada</p>
+                    <p className="text-blue-300 text-xs">
+                      Grupo: {transaction.linked_future_group || 'N/A'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
           
+          {/* Formulário de edição */}
           <div className="space-y-4">
             <div>
               <label className="text-sm text-gray-400 block mb-1">Conta *</label>
@@ -104,6 +154,7 @@ export function EditTransactionModal({ transaction, isOpen, onClose, onSave, onS
                 value={editForm.conta || ''}
                 onChange={(e) => setEditForm({...editForm, conta: e.target.value, categoria: '', subtipo: ''})}
                 className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-gray-100"
+                disabled={transaction.is_from_reconciliation} // Não editar se reconciliada
               >
                 <option value="">Selecione...</option>
                 <option value="PF">PF - Pessoa Física</option>
@@ -118,7 +169,7 @@ export function EditTransactionModal({ transaction, isOpen, onClose, onSave, onS
                 value={editForm.categoria || ''}
                 onChange={(e) => setEditForm({...editForm, categoria: e.target.value, subtipo: ''})}
                 className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-gray-100"
-                disabled={!editForm.conta}
+                disabled={!editForm.conta || transaction.is_from_reconciliation}
               >
                 <option value="">Selecione...</option>
                 {Object.keys(getCategoriesForAccount(editForm.conta || '')).map(cat => (
@@ -133,7 +184,7 @@ export function EditTransactionModal({ transaction, isOpen, onClose, onSave, onS
                 value={editForm.subtipo || ''}
                 onChange={(e) => setEditForm({...editForm, subtipo: e.target.value})}
                 className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-gray-100"
-                disabled={!editForm.categoria}
+                disabled={!editForm.categoria || transaction.is_from_reconciliation}
               >
                 <option value="">Selecione...</option>
                 {editForm.conta && editForm.categoria && 
@@ -151,12 +202,42 @@ export function EditTransactionModal({ transaction, isOpen, onClose, onSave, onS
                 onChange={(e) => setEditForm({...editForm, descricao: e.target.value})}
                 className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-gray-100"
                 placeholder="Digite a descrição..."
+                disabled={transaction.is_from_reconciliation}
               />
             </div>
           </div>
+
+          {/* Indicadores visuais */}
+          {canReconcile && (
+            <div className="bg-green-900 border border-green-700 rounded p-3 mt-4">
+              <div className="flex items-center gap-2">
+                <span className="text-green-400">🔗</span>
+                <div>
+                  <p className="text-green-100 text-sm font-medium">Reconciliação Disponível</p>
+                  <p className="text-green-300 text-xs">
+                    {availableGroupsCount} grupo(s) de transações futuras disponível(is)
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {availableGroupsCount === 0 && onReconcile && transaction.realizado === 'p' && (
+            <div className="bg-yellow-900 border border-yellow-700 rounded p-3 mt-4">
+              <div className="flex items-center gap-2">
+                <span className="text-yellow-400">⚠️</span>
+                <div>
+                  <p className="text-yellow-100 text-sm">Nenhum grupo disponível para reconciliação</p>
+                  <p className="text-yellow-300 text-xs">
+                    Importe uma fatura de cartão primeiro
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
           
           {/* Botões */}
-          <div className="flex gap-3 mt-6">
+          <div className="flex gap-2 mt-6">
             <button
               onClick={onClose}
               className="flex-1 py-2 px-4 bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors"
@@ -164,14 +245,31 @@ export function EditTransactionModal({ transaction, isOpen, onClose, onSave, onS
               Cancelar
             </button>
             
+            {/* Botão de reconciliação - sempre visível se função disponível */}
+            {onReconcile && (
+              <button
+                onClick={handleReconcile}
+                className={`py-2 px-3 rounded transition-colors flex items-center gap-1 ${
+                  canReconcile 
+                    ? 'bg-green-600 hover:bg-green-500 text-white' 
+                    : 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                }`}
+                disabled={!canReconcile}
+                title={canReconcile ? 'Reconciliar com transações futuras' : 'Nenhum grupo disponível ou transação já reconciliada'}
+              >
+                <span>🔗</span>
+                <span className="hidden sm:inline">Reconciliar</span>
+              </button>
+            )}
+            
             {/* Botão de divisão - apenas para transações não categorizadas */}
-            {onSplit && (!editForm.categoria || !editForm.subtipo) && (
+            {canSplit && (
               <button
                 onClick={() => {
                   onSplit(transaction);
                   onClose();
                 }}
-                className="py-2 px-4 bg-orange-600 hover:bg-orange-500 text-white rounded transition-colors flex items-center gap-1"
+                className="py-2 px-3 bg-orange-600 hover:bg-orange-500 text-white rounded transition-colors flex items-center gap-1"
                 title="Dividir em múltiplas transações"
               >
                 <span>✂️</span>
@@ -181,14 +279,29 @@ export function EditTransactionModal({ transaction, isOpen, onClose, onSave, onS
             
             <button
               onClick={handleSave}
-              className="flex-1 py-2 px-4 bg-green-600 hover:bg-green-500 text-white rounded transition-colors"
+              className="flex-1 py-2 px-4 bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors"
               disabled={!editForm.conta || !editForm.categoria || !editForm.subtipo || !editForm.descricao}
             >
               Salvar Alterações
             </button>
           </div>
+
+          {/* Informações adicionais */}
+          <div className="mt-4 pt-4 border-t border-gray-600">
+            <div className="text-xs text-gray-400 space-y-1">
+              {transaction.is_from_reconciliation && (
+                <p>💡 Esta transação foi criada por reconciliação e tem edição limitada</p>
+              )}
+              {canReconcile && (
+                <p>💡 Use "Reconciliar" para conectar com transações futuras de cartão</p>
+              )}
+              {canSplit && (
+                <p>💡 Use "Dividir" para separar em múltiplas categorias</p>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>
   );
-} 
+}

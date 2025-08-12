@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Upload } from 'lucide-react';
-import { Transaction, FutureTransaction } from '@/types';
+import { Transaction, FutureTransaction, ReconciliationGroup, FaturaAnalysis } from '@/types';
 import BankUpload from '@/components/BankUpload';
 import { useTransactions } from '@/hooks/useTransactions';
 import { useFutureTransactions } from '@/hooks/useFutureTransactions';
@@ -12,9 +12,11 @@ import { EditTransactionModal } from '@/components/EditTransactionModal';
 import { EditFutureTransactionModal } from '@/components/EditFutureTransactionModal';
 import { ContasTab } from '@/components/ContasTab';
 import { CartoesTab } from '@/components/CartoesTab';
+import { ReconciliationModal } from '@/components/ReconciliationModal';
+import { FaturaAnalysisModal } from '@/components/FaturaAnalysisModal';
 import { categoriesPJ, categoriesPF, categoriesCONC } from '@/lib/categories';
 
-// === COMPONENTE SPLIT MODAL INLINE ===
+// === COMPONENTE SPLIT MODAL INLINE (MANTIDO INTOCADO) ===
 interface SplitPart {
   categoria: string;
   subtipo: string;
@@ -305,14 +307,39 @@ function SplitTransactionModal({ transaction, isOpen, onClose, onSplit }: SplitT
 // === FIM DO COMPONENTE INLINE ===
 
 export default function DashboardPage() {
-  const { transactions, addTransactions, updateTransaction, splitTransaction } = useTransactions();
-  const { futureTransactions, addFutureTransactions, updateFutureTransaction, updateRelatedParcelas } = useFutureTransactions();
+  const { transactions, addTransactions, updateTransaction, splitTransaction, markAsReconciled } = useTransactions();
+  const { 
+    futureTransactions, 
+    addFutureTransactions, 
+    updateFutureTransaction, 
+    updateRelatedParcelas,
+    getAllReconciliationGroups,
+    reconcileWithPayment,
+    compareFaturaFechada,
+    applyFaturaCorrections
+  } = useFutureTransactions();
+  
   const [activeTab, setActiveTab] = useState('todos');
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [splitingTransaction, setSplitingTransaction] = useState<Transaction | null>(null);
   const [editingFutureTransaction, setEditingFutureTransaction] = useState<FutureTransaction | null>(null);
   const [showBankUpload, setShowBankUpload] = useState(false);
 
+  // ===== NOVOS ESTADOS PARA RECONCILIAÇÃO =====
+  const [showReconciliation, setShowReconciliation] = useState(false);
+  const [reconciliationTransaction, setReconciliationTransaction] = useState<Transaction | null>(null);
+  const [showFaturaAnalysis, setShowFaturaAnalysis] = useState(false);
+  const [faturaAnalysisData, setFaturaAnalysisData] = useState<FaturaAnalysis | null>(null);
+  const [availableGroups, setAvailableGroups] = useState<ReconciliationGroup[]>([]);
+
+  // Atualizar grupos disponíveis quando futureTransactions mudam
+  useEffect(() => { 
+    const groups = getAllReconciliationGroups();
+    setAvailableGroups(groups);
+    console.log('📊 Grupos de reconciliação atualizados:', groups.length);
+  }, [futureTransactions]); // ✅ Remove getAllReconciliationGroups da dependência
+
+  // ===== HANDLERS EXISTENTES (MANTIDOS) =====
   const handleEditTransaction = (transaction: Transaction) => {
     setEditingTransaction(transaction);
   };
@@ -357,39 +384,239 @@ export default function DashboardPage() {
   const handleSaveFutureTransaction = async (updatedTransaction: FutureTransaction, updateParcelas: boolean) => {
     try {
       console.log('🔄 Salvando transação futura:', updatedTransaction.id);
-      console.log('📋 Atualizar parcelas:', updateParcelas);
       
       await updateFutureTransaction(updatedTransaction);
-      console.log('✅ Transação principal atualizada');
       
       if (updateParcelas && updatedTransaction.parcela_total > 1 && !updatedTransaction.original_transaction_id) {
-        console.log('🔄 Iniciando atualização de parcelas relacionadas...');
-        
         await updateRelatedParcelas(
           updatedTransaction.id, 
           updatedTransaction.categoria, 
           updatedTransaction.subtipo,
           updatedTransaction.conta || 'PF'
         );
-        
-        console.log('✅ Parcelas relacionadas atualizadas');
       }
       
       setEditingFutureTransaction(null);
-      console.log('✅ Processo de salvamento concluído com sucesso');
       
     } catch (error) {
       console.error('❌ Erro ao salvar transação futura:', error);
-      
-      let errorMessage = 'Erro ao salvar transação. Tente novamente.';
-      if (error instanceof Error) {
-        errorMessage = `Erro: ${error.message}`;
-      }
-      
-      alert(`❌ ${errorMessage}`);
+      alert(`❌ Erro ao salvar: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
     }
   };
 
+  // ===== NOVOS HANDLERS PARA RECONCILIAÇÃO =====
+  const handleReconciliation = (transaction: Transaction) => {
+    console.log('🔗 Iniciando processo de reconciliação para:', transaction.id);
+    setReconciliationTransaction(transaction);
+    setShowReconciliation(true);
+  };
+
+  const handleConfirmReconciliation = async (selectedGroup: ReconciliationGroup) => {
+    if (!reconciliationTransaction) return;
+
+    try {
+      console.log('🔗 Confirmando reconciliação...');
+      console.log('💳 Transação:', reconciliationTransaction.id);
+      console.log('📋 Grupo:', selectedGroup.groupId);
+
+      // ETAPA 1: Reconciliar no sistema de futures
+      const reconcileResult = await reconcileWithPayment(reconciliationTransaction, selectedGroup.futures);
+      
+      if (!reconcileResult.success) {
+        throw new Error(`Erro na reconciliação: ${reconcileResult.errors.join(', ')}`);
+      }
+
+      // ETAPA 2: Marcar transação como reconciliada
+      await markAsReconciled(reconciliationTransaction, selectedGroup.groupId);
+
+      // ETAPA 3: Fechar modal e mostrar sucesso
+      setShowReconciliation(false);
+      setReconciliationTransaction(null);
+
+      alert(`✅ Reconciliação concluída com sucesso!\n\n` +
+            `💳 Pagamento: ${reconciliationTransaction.descricao_origem}\n` +
+            `📋 Grupo: ${selectedGroup.description}\n` +
+            `🔄 ${reconcileResult.convertedCount} transações futuras reconciliadas`);
+
+    } catch (error) {
+      console.error('❌ Erro na reconciliação:', error);
+      alert(`❌ Erro na reconciliação: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
+    }
+  };
+
+  const handleFaturaAnalysis = (analysisData: FaturaAnalysis) => {
+    console.log('📊 Mostrando análise da fatura:', analysisData);
+    setFaturaAnalysisData(analysisData);
+    setShowFaturaAnalysis(true);
+  };
+
+  const handleApplyCorrections = async (corrections: FaturaAnalysis) => {
+    try {
+      console.log('🔧 Aplicando correções da fatura...');
+      
+      const result = await applyFaturaCorrections(corrections);
+      
+      if (result.success) {
+        alert(`✅ Correções aplicadas com sucesso!\n\n` +
+              `📊 ${result.updatedCount} atualizadas\n` +
+              `➕ ${result.createdCount} criadas\n` +
+              `❌ ${result.deletedCount} removidas`);
+        
+        setShowFaturaAnalysis(false);
+        setFaturaAnalysisData(null);
+      } else {
+        throw new Error(`Falhas: ${result.errors.join(', ')}`);
+      }
+
+    } catch (error) {
+      console.error('❌ Erro ao aplicar correções:', error);
+      alert(`❌ Erro ao aplicar correções: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
+    }
+  };
+
+  // ===== NOVOS HANDLERS PARA CLASSIFICAÇÃO INTELIGENTE =====
+
+  // Handler para classificação rápida (transactions)
+  const handleQuickClassification = async (transactionId: string, classification: any) => {
+    try {
+      console.log('⚡ Aplicando classificação rápida:', transactionId, classification);
+      
+      const transaction = transactions.find(t => t.id === transactionId);
+      if (!transaction) {
+        console.error('❌ Transação não encontrada:', transactionId);
+        return;
+      }
+
+      const updatedTransaction: Transaction = {
+        ...transaction,
+        conta: classification.conta,
+        categoria: classification.categoria,
+        subtipo: classification.subtipo,
+        descricao: classification.descricao,
+        realizado: 's' // Marcar como realizado automaticamente
+      };
+
+      await updateTransaction(updatedTransaction);
+      alert('✅ Classificação aplicada com sucesso!');
+      
+    } catch (error) {
+      console.error('❌ Erro na classificação rápida:', error);
+      alert('❌ Erro ao aplicar classificação');
+    }
+  };
+
+  // Handler para classificação em lote (transactions)
+  const handleBatchClassification = async (classifications: Array<{
+    id: string;
+    conta: string;
+    categoria: string;
+    subtipo: string;
+    descricao: string;
+  }>) => {
+    try {
+      console.log('📊 Aplicando classificação em lote:', classifications.length, 'transações');
+      
+      const promises = classifications.map(async (classification) => {
+        const transaction = transactions.find(t => t.id === classification.id);
+        if (!transaction) {
+          console.warn('⚠️ Transação não encontrada:', classification.id);
+          return null;
+        }
+
+        const updatedTransaction: Transaction = {
+          ...transaction,
+          conta: classification.conta,
+          categoria: classification.categoria,
+          subtipo: classification.subtipo,
+          descricao: classification.descricao,
+          realizado: 's' // Marcar como realizado automaticamente
+        };
+
+        return updateTransaction(updatedTransaction);
+      });
+
+      // Executar todas as atualizações
+      const results = await Promise.all(promises);
+      const successCount = results.filter(r => r !== null).length;
+      
+      alert(`✅ ${successCount}/${classifications.length} transações classificadas com sucesso!`);
+      
+    } catch (error) {
+      console.error('❌ Erro na classificação em lote:', error);
+      alert('❌ Erro ao aplicar classificações em lote');
+    }
+  };
+
+  // Handler para classificação rápida (future transactions)
+  const handleQuickClassificationFutures = async (transactionId: string, classification: any) => {
+    try {
+      console.log('⚡ Aplicando classificação rápida em future:', transactionId, classification);
+      
+      const futureTransaction = futureTransactions.find(t => t.id === transactionId);
+      if (!futureTransaction) {
+        console.error('❌ Future transaction não encontrada:', transactionId);
+        return;
+      }
+
+      const updatedTransaction: FutureTransaction = {
+        ...futureTransaction,
+        categoria: classification.categoria,
+        subtipo: classification.subtipo,
+        descricao: classification.descricao,
+        status: 'confirmed' // Marcar como confirmada
+      };
+
+      await updateFutureTransaction(updatedTransaction);
+      alert('✅ Classificação aplicada com sucesso!');
+      
+    } catch (error) {
+      console.error('❌ Erro na classificação rápida future:', error);
+      alert('❌ Erro ao aplicar classificação');
+    }
+  };
+
+  // Handler para classificação em lote (future transactions)
+  const handleBatchClassificationFutures = async (classifications: Array<{
+    id: string;
+    conta: string;
+    categoria: string;
+    subtipo: string;
+    descricao: string;
+  }>) => {
+    try {
+      console.log('📊 Aplicando classificação em lote futures:', classifications.length, 'transações');
+      
+      const promises = classifications.map(async (classification) => {
+        const futureTransaction = futureTransactions.find(t => t.id === classification.id);
+        if (!futureTransaction) {
+          console.warn('⚠️ Future transaction não encontrada:', classification.id);
+          return null;
+        }
+
+        const updatedTransaction: FutureTransaction = {
+          ...futureTransaction,
+          categoria: classification.categoria,
+          subtipo: classification.subtipo,
+          descricao: classification.descricao,
+          status: 'confirmed' // Marcar como confirmada
+        };
+
+        return updateFutureTransaction(updatedTransaction);
+      });
+
+      // Executar todas as atualizações
+      const results = await Promise.all(promises);
+      const successCount = results.filter(r => r !== null).length;
+      
+      alert(`✅ ${successCount}/${classifications.length} future transactions classificadas com sucesso!`);
+      
+    } catch (error) {
+      console.error('❌ Erro na classificação em lote futures:', error);
+      alert('❌ Erro ao aplicar classificações em lote');
+    }
+  };
+
+  // ===== HANDLERS DE IMPORTAÇÃO (ATUALIZADOS) =====
   const handleTransactionsImported = async (importedTransactions: Transaction[]) => {
     try {
       const result = await addTransactions(importedTransactions);
@@ -402,6 +629,43 @@ export default function DashboardPage() {
 
   const handleFutureTransactionsImported = async (importedFutureTransactions: FutureTransaction[], referenceMes: string) => {
     try {
+      // Verificar se é fatura fechada vs projetada
+      const shouldAnalyze = importedFutureTransactions.some(f => f.status === 'confirmed');
+      
+      if (shouldAnalyze) {
+        // É uma fatura fechada - comparar com projeções existentes
+        const existingProjections = futureTransactions.filter(f => 
+          f.mes_vencimento === referenceMes && f.status === 'projected'
+        );
+        
+        if (existingProjections.length > 0) {
+          // Simular transactions da fatura fechada para comparação
+          const realTransactions: Transaction[] = importedFutureTransactions.map(f => ({
+            id: f.id,
+            mes: f.mes_vencimento,
+            data: f.data_vencimento,
+            descricao_origem: f.descricao_origem,
+            subtipo: f.subtipo,
+            categoria: f.categoria,
+            descricao: f.descricao,
+            valor: f.valor,
+            origem: f.origem,
+            cc: f.cc,
+            realizado: 's',
+            conta: ''
+          }));
+          
+          const analysis = compareFaturaFechada(existingProjections, realTransactions);
+          
+          // Se há diferenças, mostrar modal de análise
+          if (analysis.changed.length > 0 || analysis.removed.length > 0 || analysis.added.length > 0) {
+            handleFaturaAnalysis(analysis);
+            return { success: true, stats: { total: 0, added: 0, duplicates: 0 } };
+          }
+        }
+      }
+
+      // Importação normal
       const result = await addFutureTransactions(importedFutureTransactions);
       return result;
     } catch (error) {
@@ -518,6 +782,10 @@ export default function DashboardPage() {
               <OverviewTab 
                 transactions={transactions} 
                 onEditTransaction={handleEditTransaction}
+                onReconcileTransaction={handleReconciliation}
+                availableGroupsCount={availableGroups.length}
+                onApplyQuickClassification={handleQuickClassification}
+                onApplyBatchClassification={handleBatchClassification}
               />
             )}
 
@@ -533,6 +801,8 @@ export default function DashboardPage() {
               <CartoesTab 
                 futureTransactions={futureTransactions}
                 onEditFutureTransaction={handleEditFutureTransaction}
+                onApplyQuickClassification={handleQuickClassificationFutures}
+                onApplyBatchClassification={handleBatchClassificationFutures}
               />
             )}
 
@@ -564,16 +834,18 @@ export default function DashboardPage() {
           onFutureTransactionsImported={handleFutureTransactionsImported}
         />
 
-        {/* Modal de edição de transações normais */}
+        {/* Modal de edição de transações normais - ATUALIZADO COM RECONCILIAÇÃO */}
         <EditTransactionModal
           transaction={editingTransaction}
           isOpen={!!editingTransaction}
           onClose={() => setEditingTransaction(null)}
           onSave={handleSaveTransaction}
           onSplit={handleSplitTransaction}
+          onReconcile={handleReconciliation}
+          availableGroupsCount={availableGroups.length}
         />
 
-        {/* Modal de divisão de transações */}
+        {/* Modal de divisão de transações (MANTIDO INTOCADO) */}
         <SplitTransactionModal
           transaction={splitingTransaction}
           isOpen={!!splitingTransaction}
@@ -588,6 +860,46 @@ export default function DashboardPage() {
           onClose={() => setEditingFutureTransaction(null)}
           onSave={handleSaveFutureTransaction}
         />
+
+        {/* ===== NOVOS MODAIS PARA RECONCILIAÇÃO ===== */}
+        
+        {/* Modal de Reconciliação */}
+        <ReconciliationModal
+          transaction={reconciliationTransaction}
+          isOpen={showReconciliation}
+          onClose={() => {
+            setShowReconciliation(false);
+            setReconciliationTransaction(null);
+          }}
+          onConfirm={handleConfirmReconciliation}
+          availableGroups={availableGroups}
+        />
+
+        {/* Modal de Análise de Fatura */}
+        <FaturaAnalysisModal
+          isOpen={showFaturaAnalysis}
+          analysisData={faturaAnalysisData}
+          onClose={() => {
+            setShowFaturaAnalysis(false);
+            setFaturaAnalysisData(null);
+          }}
+          onApplyCorrections={handleApplyCorrections}
+        />
+
+        {/* Indicador de grupos disponíveis (debug/info) */}
+        {availableGroups.length > 0 && (
+          <div className="fixed bottom-4 right-4 bg-green-900 border border-green-700 rounded-lg p-3 shadow-lg">
+            <div className="flex items-center gap-2">
+              <span className="text-green-400">🔗</span>
+              <div>
+                <p className="text-green-100 text-sm font-medium">Reconciliação Disponível</p>
+                <p className="text-green-300 text-xs">
+                  {availableGroups.length} grupo(s) de transações futuras
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

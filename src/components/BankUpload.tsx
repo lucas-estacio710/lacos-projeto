@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { Upload } from 'lucide-react';
 import { Transaction, BankType, FutureTransaction } from '@/types';
 import { formatMonth } from '@/lib/utils';
+import { generateSubscriptionFingerprint, generateReconciliationGroupId } from '@/lib/reconciliationService';
 import * as XLSX from 'xlsx';
 
 interface BankUploadProps {
@@ -24,19 +25,17 @@ export function BankUpload({ isOpen, onClose, onTransactionsImported, onFutureTr
       hash = ((hash << 5) - hash) + char;
       hash = hash & hash;
     }
-    return Math.abs(hash).toString(36).substring(0, 8).toUpperCase(); // Aumentado para 8 caracteres
+    return Math.abs(hash).toString(36).substring(0, 8).toUpperCase();
   };
 
-  // Gerador de ID único DETERMINÍSTICO (sem timestamp para permitir detecção de duplicatas)
+  // Gerador de ID único DETERMINÍSTICO
   const generateUniqueID = (banco: string, dataLancamento: string, descricao: string, valor: number, parcela: number = 1, aparicao: number = 1): string => {
-    // Usar data do lançamento para tornar ID único por dia
-    const dataFormatada = dataLancamento.replace(/-/g, '').slice(-6); // YYMMDD
-    const valorHash = Math.abs(Math.round(valor * 100)).toString(36).slice(-3); // 3 últimos do valor
-    const descHash = simpleHash(descricao).slice(0, 4); // 4 primeiros da descrição
-    const parcelaStr = parcela.toString().padStart(2, '0'); // Parcela com 2 dígitos
-    const aparicaoStr = aparicao.toString().padStart(2, '0'); // Aparição com 2 dígitos (01, 02, 03...)
+    const dataFormatada = dataLancamento.replace(/-/g, '').slice(-6);
+    const valorHash = Math.abs(Math.round(valor * 100)).toString(36).slice(-3);
+    const descHash = simpleHash(descricao).slice(0, 4);
+    const parcelaStr = parcela.toString().padStart(2, '0');
+    const aparicaoStr = aparicao.toString().padStart(2, '0');
     
-    // SEM TIMESTAMP - ID deve ser determinístico para detectar duplicatas entre uploads
     return `${banco}${dataFormatada}${descHash}${valorHash}${parcelaStr}${aparicaoStr}`;
   };
 
@@ -91,7 +90,6 @@ export function BankUpload({ isOpen, onClose, onTransactionsImported, onFutureTr
     return isNegative ? -numericValue : numericValue;
   };
 
-  // Gerador de ID único usando hash da descrição completa
   const generateID = (banco: string, data: string, descricao: string, valor: number): string => {
     const dateStr = data.replace(/\D/g, '');
     const descHash = simpleHash(descricao);
@@ -110,7 +108,7 @@ export function BankUpload({ isOpen, onClose, onTransactionsImported, onFutureTr
     return '';
   };
 
-  // Nova função para processar parcelas do Nubank
+  // Função para processar parcelas do Nubank
   const parseParcelaInfo = (titulo: string): { estabelecimento: string; parcelaAtual: number; parcelaTotal: number; temParcela: boolean } => {
     const parcelaRegex = /(.+?)\s*-\s*Parcela\s+(\d+)\/(\d+)$/i;
     const match = titulo.match(parcelaRegex);
@@ -134,15 +132,14 @@ export function BankUpload({ isOpen, onClose, onTransactionsImported, onFutureTr
 
   // Função para adicionar meses a uma data no formato AAMM
   const addMonthsToMes = (mesBase: string, mesesAdicionar: number): string => {
-    // mesBase formato: AAMM (ex: 2507)
-    const ano = parseInt('20' + mesBase.substring(0, 2)); // 2025
-    const mes = parseInt(mesBase.substring(2, 4)); // 07
+    const ano = parseInt('20' + mesBase.substring(0, 2));
+    const mes = parseInt(mesBase.substring(2, 4));
     
     console.log(`📅 Calculando: ${mesBase} + ${mesesAdicionar} meses | Ano: ${ano}, Mês: ${mes}`);
     
     const novaData = new Date(ano, mes - 1 + mesesAdicionar, 1);
-    const novoAno = novaData.getFullYear().toString().slice(-2); // 25
-    const novoMes = (novaData.getMonth() + 1).toString().padStart(2, '0'); // 08
+    const novoAno = novaData.getFullYear().toString().slice(-2);
+    const novoMes = (novaData.getMonth() + 1).toString().padStart(2, '0');
     
     const resultado = `${novoAno}${novoMes}`;
     console.log(`📅 Resultado: ${resultado} (${formatMonth(resultado)})`);
@@ -150,7 +147,7 @@ export function BankUpload({ isOpen, onClose, onTransactionsImported, onFutureTr
     return resultado;
   };
 
-  // Função para gerar data de vencimento baseada no mês de referência, mantendo o dia original
+  // Função para gerar data de vencimento baseada no mês de referência
   const generateVencimentoDateFromOriginal = (dataOriginal: string, mesReferencia: string): string => {
     const [year, month, day] = dataOriginal.split('-');
     const ano = parseInt('20' + mesReferencia.substring(0, 2));
@@ -176,12 +173,15 @@ export function BankUpload({ isOpen, onClose, onTransactionsImported, onFutureTr
       console.log('Total de linhas no arquivo:', lines.length);
       
       if (selectedBank === 'Nubank') {
-        // Processar arquivo do Nubank (Future Transactions)
+        // ===== PROCESSAR NUBANK (FUTURES) =====
         const futureTransactions: FutureTransaction[] = [];
         const allParcelas: FutureTransaction[] = [];
         let processedLines = 0;
         
-        // Controlar aparições de transações idênticas dentro da mesma fatura
+        // Gerar reconciliation_group para esta fatura
+        const reconciliationGroup = generateReconciliationGroupId(selectedBank, referenceMes);
+        console.log('🔗 Grupo de reconciliação:', reconciliationGroup);
+        
         const transactionCounts = new Map<string, number>();
         
         for (let i = 1; i < lines.length; i++) {
@@ -203,68 +203,87 @@ export function BankUpload({ isOpen, onClose, onTransactionsImported, onFutureTr
             
             const parcelaInfo = parseParcelaInfo(titulo);
             
-            // Criar chave única para detectar transações similares dentro da mesma fatura
             const transactionKey = `${dataCompra}_${titulo}_${valor}`;
             const currentCount = (transactionCounts.get(transactionKey) || 0) + 1;
             transactionCounts.set(transactionKey, currentCount);
             
-            // Gerar ID único incluindo a ordem de aparição
             const id = generateUniqueID('NUB', dataCompra, titulo, valor, parcelaInfo.parcelaAtual, currentCount);
             
-            console.log(`🔑 ID gerado: ${id} | Data: ${dataCompra} | Título: ${titulo.substring(0, 20)}... | Valor: ${valor} | Aparição: ${currentCount}`);
+            // Gerar subscription fingerprint
+            const subscriptionFingerprint = generateSubscriptionFingerprint({
+              id: id,
+              descricao_origem: titulo,
+              valor: -valor,
+              mes: referenceMes,
+              data: dataCompra,
+              subtipo: '',
+              categoria: '',
+              descricao: titulo,
+              origem: 'Nubank',
+              cc: 'Nubank',
+              realizado: 'p',
+              conta: ''
+            });
             
-            // Transação principal (sempre da fatura atual)
+            console.log(`🔑 ID: ${id} | Fingerprint: ${subscriptionFingerprint}`);
+            
+            // Transação principal
             const futureTransaction: FutureTransaction = {
               id,
-              mes_vencimento: referenceMes, // Mês de referência da fatura informado no upload
-              data_vencimento: dataCompra, // Data real do lançamento (do CSV)
+              mes_vencimento: referenceMes,
+              data_vencimento: dataCompra,
               descricao_origem: titulo,
               categoria: '',
               subtipo: '',
               descricao: titulo,
-              valor: -valor, // Negativo porque é gasto
+              valor: -valor,
               origem: 'Nubank',
               cc: 'Nubank',
               parcela_atual: parcelaInfo.parcelaAtual,
               parcela_total: parcelaInfo.parcelaTotal,
               estabelecimento: parcelaInfo.estabelecimento,
-              status: 'projected'
+              status: 'projected',
+              // ===== NOVOS CAMPOS PARA RECONCILIAÇÃO =====
+              subscription_fingerprint: subscriptionFingerprint,
+              reconciliation_group: reconciliationGroup,
+              is_reconciled: false,
+              valor_original: -valor
             };
             
             futureTransactions.push(futureTransaction);
             
-            // Se tem parcelas, gerar as próximas
+            // Gerar parcelas futuras se necessário
             if (parcelaInfo.temParcela && parcelaInfo.parcelaTotal > 1) {
               console.log(`🔄 Gerando parcelas para: ${parcelaInfo.estabelecimento} (${parcelaInfo.parcelaAtual}/${parcelaInfo.parcelaTotal})`);
               
               for (let parcela = parcelaInfo.parcelaAtual + 1; parcela <= parcelaInfo.parcelaTotal; parcela++) {
                 const mesVencimentoParcela = addMonthsToMes(referenceMes, parcela - parcelaInfo.parcelaAtual);
-                
-                // USAR A MESMA DESCRIÇÃO DA TRANSAÇÃO ORIGINAL (sem "- Parcela X/Y")
-                const parcelaDescricao = parcelaInfo.estabelecimento; // Apenas o estabelecimento
+                const parcelaDescricao = parcelaInfo.estabelecimento;
                 const parcelaId = generateUniqueID('NUB', dataCompra, parcelaDescricao, valor, parcela, currentCount);
-                
-                // USAR DATA ORIGINAL DO LANÇAMENTO, mas com mês/ano da parcela
                 const dataVencimentoParcela = generateVencimentoDateFromOriginal(dataCompra, mesVencimentoParcela);
-                
-                console.log(`  📅 Parcela ${parcela}/${parcelaInfo.parcelaTotal}: ${mesVencimentoParcela} (${formatMonth(mesVencimentoParcela)}) - Data: ${dataVencimentoParcela}`);
                 
                 const parcelaTransaction: FutureTransaction = {
                   id: parcelaId,
-                  original_transaction_id: id, // Link para transação original
-                  mes_vencimento: mesVencimentoParcela, // Parcelas futuras usam mês calculado
-                  data_vencimento: dataVencimentoParcela, // Mantém o dia original da compra
-                  descricao_origem: `${parcelaInfo.estabelecimento} - Parcela ${parcela}/${parcelaInfo.parcelaTotal}`, // Manter formato original
-                  categoria: '', // Será preenchido quando o original for classificado
+                  original_transaction_id: id,
+                  mes_vencimento: mesVencimentoParcela,
+                  data_vencimento: dataVencimentoParcela,
+                  descricao_origem: `${parcelaInfo.estabelecimento} - Parcela ${parcela}/${parcelaInfo.parcelaTotal}`,
+                  categoria: '',
                   subtipo: '',
-                  descricao: parcelaInfo.estabelecimento, // MESMA DESCRIÇÃO da transação original
+                  descricao: parcelaInfo.estabelecimento,
                   valor: -valor,
                   origem: 'Nubank',
                   cc: 'Nubank',
                   parcela_atual: parcela,
                   parcela_total: parcelaInfo.parcelaTotal,
                   estabelecimento: parcelaInfo.estabelecimento,
-                  status: 'projected'
+                  status: 'projected',
+                  // ===== NOVOS CAMPOS PARA RECONCILIAÇÃO =====
+                  subscription_fingerprint: subscriptionFingerprint,
+                  original_future_id: id,
+                  reconciliation_group: generateReconciliationGroupId(selectedBank, mesVencimentoParcela),
+                  is_reconciled: false,
+                  valor_original: -valor
                 };
                 
                 allParcelas.push(parcelaTransaction);
@@ -281,7 +300,6 @@ export function BankUpload({ isOpen, onClose, onTransactionsImported, onFutureTr
           return;
         }
         
-        // Combinar todas as transações (fatura + parcelas futuras)
         const todasTransacoes = [...futureTransactions, ...allParcelas];
         
         try {
@@ -300,10 +318,11 @@ export function BankUpload({ isOpen, onClose, onTransactionsImported, onFutureTr
               message += `🔄 ${duplicates} duplicatas ignoradas\n`;
             }
             
-            message += `\n📅 Mês de referência: ${referenceMes}`;
+            message += `\n🔗 Grupo: ${reconciliationGroup}`;
+            message += `\n📅 Mês: ${referenceMes}`;
             message += `\n📁 ${processedLines} linhas processadas`;
           } else {
-            message = `✅ ${futureTransactions.length} transações processadas!\n📊 ${processedLines} linhas lidas do arquivo`;
+            message = `✅ ${futureTransactions.length} transações processadas!`;
           }
           
           alert(message);
@@ -316,7 +335,7 @@ export function BankUpload({ isOpen, onClose, onTransactionsImported, onFutureTr
         return;
       }
       
-      // Código existente para Inter e BB
+      // ===== PROCESSAR BANCOS (TRANSACTIONS) =====
       const importedTransactions: Transaction[] = [];
       let processedLines = 0;
       
@@ -332,7 +351,7 @@ export function BankUpload({ isOpen, onClose, onTransactionsImported, onFutureTr
           console.log('Total de linhas no arquivo:', data.length);
           
           for (let i = 1; i < data.length; i++) {
-          const row = data[i] as any[];
+            const row = data[i] as any[];
             if (!row || row.length < 6) continue;
             
             processedLines++;
@@ -345,11 +364,9 @@ export function BankUpload({ isOpen, onClose, onTransactionsImported, onFutureTr
             
             if (!dataStr || !valorStr || !descricao) continue;
             
-            // Converter data DD-MM-YYYY para DD/MM/YYYY
             const [day, month, year] = dataStr.split('-');
             const dataBR = `${day}/${month}/${year}`;
             
-            // Parsear valor
             const valor = parseValorBR(valorStr);
             if (isNaN(valor)) continue;
             
@@ -369,7 +386,12 @@ export function BankUpload({ isOpen, onClose, onTransactionsImported, onFutureTr
               origem: 'TON',
               cc: 'TON',
               realizado: 'p',
-              conta: ''
+              conta: '',
+              // ===== NOVOS CAMPOS PARA RECONCILIAÇÃO =====
+              linked_future_group: undefined,
+              is_from_reconciliation: false,
+              future_subscription_id: undefined,
+              reconciliation_metadata: undefined
             };
             
             importedTransactions.push(transaction);
@@ -380,9 +402,8 @@ export function BankUpload({ isOpen, onClose, onTransactionsImported, onFutureTr
           return;
         }
       } 
-
-      if (selectedBank === 'Inter') {
-        // Processar arquivo do Inter (código existente)
+      else if (selectedBank === 'Inter') {
+        // Processar arquivo do Inter
         if (lines.length < 7) {
           alert('❌ Arquivo deve ter pelo menos 7 linhas (5 para pular + cabeçalho + dados)');
           return;
@@ -444,14 +465,20 @@ export function BankUpload({ isOpen, onClose, onTransactionsImported, onFutureTr
               origem: 'Inter',
               cc: 'Inter',
               realizado: 'p',
-              conta: ''
+              conta: '',
+              // ===== NOVOS CAMPOS PARA RECONCILIAÇÃO =====
+              linked_future_group: undefined,
+              is_from_reconciliation: false,
+              future_subscription_id: undefined,
+              reconciliation_metadata: undefined
             };
             
             importedTransactions.push(transaction);
           }
         }
-      } else if (selectedBank === 'BB') {
-        // Processar arquivo do Banco do Brasil (código existente)
+      } 
+      else if (selectedBank === 'BB') {
+        // Processar arquivo do Banco do Brasil
         for (let i = 1; i < lines.length; i++) {
           const line = lines[i].trim();
           if (!line) continue;
@@ -515,7 +542,12 @@ export function BankUpload({ isOpen, onClose, onTransactionsImported, onFutureTr
               origem: 'BB',
               cc: 'BB',
               realizado: 'p',
-              conta: ''
+              conta: '',
+              // ===== NOVOS CAMPOS PARA RECONCILIAÇÃO =====
+              linked_future_group: undefined,
+              is_from_reconciliation: false,
+              future_subscription_id: undefined,
+              reconciliation_metadata: undefined
             };
             
             importedTransactions.push(transaction);
@@ -538,7 +570,7 @@ export function BankUpload({ isOpen, onClose, onTransactionsImported, onFutureTr
         if (result?.success && result?.stats) {
           const { total = 0, added = 0, duplicates = 0 } = result.stats;
           
-          message = `✅ Importação concluída!\n\n`;
+          message = `✅ Importação ${selectedBank} concluída!\n\n`;
           message += `📊 ${total} transações processadas\n`;
           message += `➕ ${added} novas transações adicionadas\n`;
           
@@ -547,16 +579,9 @@ export function BankUpload({ isOpen, onClose, onTransactionsImported, onFutureTr
           }
           
           message += `\n📁 ${processedLines} linhas lidas do arquivo`;
-          
-          if (duplicates > 0 && added > 0) {
-            message += `\n\n💡 Arquivo continha dados novos e já existentes - mesclado com sucesso!`;
-          } else if (duplicates > 0 && added === 0) {
-            message += `\n\n💡 Todas as transações já existiam no sistema.`;
-          } else if (added === total) {
-            message += `\n\n💡 Todas as transações eram novas!`;
-          }
+          message += `\n🔗 Pronto para reconciliação!`;
         } else {
-          message = `✅ ${importedTransactions.length} transações processadas!\n📊 ${processedLines} linhas lidas do arquivo`;
+          message = `✅ ${importedTransactions.length} transações processadas!`;
         }
         
         alert(message);
@@ -620,6 +645,7 @@ export function BankUpload({ isOpen, onClose, onTransactionsImported, onFutureTr
               </div>
             )}
 
+            {/* Informações específicas por banco */}
             {selectedBank === 'Inter' && (
               <div className="bg-orange-900 p-3 rounded-lg border border-orange-700">
                 <h4 className="font-medium text-orange-100 mb-2">📋 Formato Inter</h4>
@@ -652,28 +678,32 @@ export function BankUpload({ isOpen, onClose, onTransactionsImported, onFutureTr
                   <li>• Colunas: date, title, amount</li>
                   <li>• Detecta parcelas automaticamente</li>
                   <li>• Gera parcelas futuras quando aplicável</li>
+                  <li>• Cria grupo de reconciliação automaticamente</li>
                 </ul>
               </div>
             )}
             
             {selectedBank === 'TON' && (
-            <div className="bg-green-900 p-3 rounded-lg border border-green-700">
-              <h4 className="font-medium text-green-100 mb-2">📋 Formato TON</h4>
-              <ul className="text-sm text-green-200 space-y-1">
-                <li>• Arquivo Excel (.xlsx)</li>
-                <li>• Colunas: Data, Valor, Tipo, Status, Identificador, Descrição</li>
-                <li>• Data: DD-MM-YYYY</li>
-                <li>• Valor: R$ formato brasileiro</li>
-              </ul>
-            </div>
-          )}
+              <div className="bg-green-900 p-3 rounded-lg border border-green-700">
+                <h4 className="font-medium text-green-100 mb-2">📋 Formato TON</h4>
+                <ul className="text-sm text-green-200 space-y-1">
+                  <li>• Arquivo Excel (.xlsx)</li>
+                  <li>• Colunas: Data, Valor, Tipo, Status, Identificador, Descrição</li>
+                  <li>• Data: DD-MM-YYYY</li>
+                  <li>• Valor: R$ formato brasileiro</li>
+                </ul>
+              </div>
+            )}
 
+            {/* Sistema de Reconciliação */}
             <div className="bg-blue-900 p-3 rounded-lg border border-blue-700">
-              <h4 className="font-medium text-blue-100 mb-2">🔒 Sistema Inteligente</h4>
+              <h4 className="font-medium text-blue-100 mb-2">🔒 Sistema de Reconciliação</h4>
               <ul className="text-sm text-blue-200 space-y-1">
                 <li>• ✅ IDs únicos com hash da descrição</li>
                 <li>• ✅ Evita duplicatas automaticamente</li>
                 <li>• ✅ Extratos sobrepostos são mesclados</li>
+                <li>• ✅ Grupos de reconciliação automáticos</li>
+                <li>• ✅ Subscription fingerprints para assinaturas</li>
                 {selectedBank === 'Nubank' && (
                   <li>• ✅ Gera parcelas futuras automaticamente</li>
                 )}
@@ -686,7 +716,9 @@ export function BankUpload({ isOpen, onClose, onTransactionsImported, onFutureTr
             >
               <div className="text-center">
                 <Upload className="w-8 h-8 mx-auto mb-2 text-blue-400" />
-                <p className="text-blue-100 font-medium">Selecionar Arquivo CSV</p>
+                <p className="text-blue-100 font-medium">
+                  Selecionar Arquivo {selectedBank === 'TON' ? 'Excel' : 'CSV'}
+                </p>
                 <p className="text-blue-300 text-sm mt-1">
                   {selectedBank === 'Nubank' ? 'Fatura do Nubank' : `Extrato do ${selectedBank}`}
                 </p>
@@ -696,7 +728,7 @@ export function BankUpload({ isOpen, onClose, onTransactionsImported, onFutureTr
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv"
+              accept={selectedBank === 'TON' ? '.xlsx,.xls' : '.csv'}
               onChange={handleFileUpload}
               className="hidden"
             />

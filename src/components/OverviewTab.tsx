@@ -1,17 +1,45 @@
+// components/OverviewTab.tsx - VERSÃO ATUALIZADA COM CLASSIFICAÇÃO INTELIGENTE
+
 import React, { useState } from 'react';
 import { Calendar, Search } from 'lucide-react';
-import { Transaction } from '@/types';
+import { Transaction, FutureTransaction } from '@/types';
 import { categoriesPJ, categoriesPF, categoriesCONC } from '@/lib/categories';
 import { CategorySection } from './CategorySection';
-import { UnclassifiedSection } from './UnclassifiedSection';
 import { SummaryBox } from './SummaryBox';
+import { EnhancedUnclassifiedSection } from './EnhancedUnclassifiedSection';
 
 interface OverviewTabProps {
   transactions: Transaction[];
   onEditTransaction: (transaction: Transaction) => void;
+  onReconcileTransaction?: (transaction: Transaction) => void;
+  availableGroupsCount?: number;
+  onApplyQuickClassification?: (transactionId: string, classification: any) => Promise<void>;
+  onApplyBatchClassification?: (classifications: Array<{
+    id: string;
+    conta: string;
+    categoria: string;
+    subtipo: string;
+    descricao: string;
+  }>) => Promise<void>;
 }
 
-export function OverviewTab({ transactions, onEditTransaction }: OverviewTabProps) {
+// Função wrapper para compatibilidade com EnhancedUnclassifiedSection
+const handleEditTransactionWrapper = (
+  transaction: Transaction | FutureTransaction, 
+  onEditTransaction: (transaction: Transaction) => void
+) => {
+  // Como estamos no contexto de transactions, sabemos que é Transaction
+  onEditTransaction(transaction as Transaction);
+};
+
+export function OverviewTab({ 
+  transactions, 
+  onEditTransaction, 
+  onReconcileTransaction,
+  availableGroupsCount = 0,
+  onApplyQuickClassification,
+  onApplyBatchClassification
+}: OverviewTabProps) {
   const [selectedMonth, setSelectedMonth] = useState('todos');
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -28,6 +56,18 @@ export function OverviewTab({ transactions, onEditTransaction }: OverviewTabProp
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
     });
+  };
+
+  const formatDate = (dateStr: string) => {
+    if (!dateStr) return '';
+    if (dateStr.includes('/')) return dateStr;
+    if (dateStr.length === 8) {
+      const year = dateStr.substring(0, 4);
+      const month = dateStr.substring(4, 6);
+      const day = dateStr.substring(6, 8);
+      return `${day}/${month}/${year}`;
+    }
+    return dateStr;
   };
 
   const availableMonths = [...new Set(transactions.map(t => t.mes))].filter(m => m).sort().reverse();
@@ -88,9 +128,16 @@ export function OverviewTab({ transactions, onEditTransaction }: OverviewTabProp
       </div>
 
       <div className="space-y-4">
-        <UnclassifiedSection 
-          transactions={getFilteredTransactions()} 
-          onEditTransaction={onEditTransaction} 
+        {/* Seção de não classificados - NOVA VERSÃO INTELIGENTE */}
+        <EnhancedUnclassifiedSection
+          transactions={getFilteredTransactions()}
+          historicTransactions={transactions.filter(t => t.realizado === 's')}
+          onEditTransaction={(transaction) => handleEditTransactionWrapper(transaction, onEditTransaction)}
+          onReconcileTransaction={onReconcileTransaction}
+          onApplyQuickClassification={onApplyQuickClassification}
+          onApplyBatchClassification={onApplyBatchClassification}
+          availableGroupsCount={availableGroupsCount}
+          type="transactions"
         />
         
         <div className="bg-gray-700 p-2 rounded-lg">
@@ -188,6 +235,42 @@ export function OverviewTab({ transactions, onEditTransaction }: OverviewTabProp
             </div>
           </div>
         </div>
+
+        {/* Indicador de reconciliação no final */}
+        {onReconcileTransaction && availableGroupsCount > 0 && (
+          <div className="bg-green-900 border border-green-700 rounded-lg p-4">
+            <div className="flex items-center gap-3">
+              <span className="text-green-400 text-2xl">🔗</span>
+              <div>
+                <h4 className="text-green-100 font-medium">Sistema de Reconciliação Ativo</h4>
+                <p className="text-green-300 text-sm">
+                  {availableGroupsCount} grupo(s) de transações futuras disponível(is) para reconciliação
+                </p>
+                <p className="text-green-400 text-xs mt-1">
+                  💡 Use o botão "🔗 Reconciliar" nas transações não classificadas para conectar com faturas de cartão
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Indicador de sistema de classificação inteligente */}
+        {(onApplyQuickClassification || onApplyBatchClassification) && (
+          <div className="bg-blue-900 border border-blue-700 rounded-lg p-4">
+            <div className="flex items-center gap-3">
+              <span className="text-blue-400 text-2xl">🤖</span>
+              <div>
+                <h4 className="text-blue-100 font-medium">Classificação Inteligente Ativa</h4>
+                <p className="text-blue-300 text-sm">
+                  Sistema com sugestões baseadas no histórico e classificação em lote
+                </p>
+                <p className="text-blue-400 text-xs mt-1">
+                  💡 Use botões rápidos (🛒🍽️🚗), sugestões IA (🤖) ou classificação em lote (⚡) para acelerar
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </>
   );

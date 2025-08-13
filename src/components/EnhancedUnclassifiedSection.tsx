@@ -1,8 +1,8 @@
-// components/EnhancedUnclassifiedSection.tsx - SEÇÃO ATUALIZADA COM AS 3 SOLUÇÕES
+// components/EnhancedUnclassifiedSection.tsx - VERSÃO ATUALIZADA PARA NOVA ESTRUTURA
 
 import React, { useState } from 'react';
-import { ChevronDown, ChevronUp } from 'lucide-react';
-import { Transaction, FutureTransaction } from '@/types';
+import { Transaction } from '@/types';
+import { CardTransaction } from '@/hooks/useCardTransactions';
 import { BatchClassificationModal } from '@/components/BatchClassificationModal';
 import { 
   QUICK_ACTION_CATEGORIES, 
@@ -13,9 +13,12 @@ import {
 import { formatCurrency, formatDate } from '@/lib/utils';
 
 interface EnhancedUnclassifiedSectionProps {
-  transactions: (Transaction | FutureTransaction)[];
+  transactions?: Transaction[];
+  cardTransactions?: CardTransaction[];
   historicTransactions: Transaction[];
-  onEditTransaction: (transaction: Transaction | FutureTransaction) => void;
+  historicCardTransactions?: CardTransaction[];
+  onEditTransaction?: (transaction: Transaction) => void;
+  onEditCardTransaction?: (transaction: CardTransaction) => void;
   onReconcileTransaction?: (transaction: Transaction) => void;
   onApplyQuickClassification?: (transactionId: string, classification: any) => Promise<void>;
   onApplyBatchClassification?: (classifications: Array<{
@@ -25,54 +28,51 @@ interface EnhancedUnclassifiedSectionProps {
     subtipo: string;
     descricao: string;
   }>) => Promise<void>;
-  availableGroupsCount?: number;
-  type?: 'transactions' | 'futures'; // Diferenciar o tipo
+  canReconcile?: boolean;
+  type: 'transactions' | 'cards';
+  title?: string;
 }
 
 export function EnhancedUnclassifiedSection({ 
-  transactions,
+  transactions = [],
+  cardTransactions = [],
   historicTransactions,
+  historicCardTransactions = [],
   onEditTransaction,
+  onEditCardTransaction,
   onReconcileTransaction,
   onApplyQuickClassification,
   onApplyBatchClassification,
-  availableGroupsCount = 0,
-  type = 'transactions'
+  canReconcile = false,
+  type,
+  title
 }: EnhancedUnclassifiedSectionProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showBatchModal, setShowBatchModal] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState<Record<string, boolean>>({});
   const [suggestions, setSuggestions] = useState<Record<string, SmartSuggestion[]>>({});
 
-  // Filtrar apenas não classificados
-  const unclassified = transactions.filter(t => {
-    if (type === 'transactions') {
-      return (t as Transaction).realizado === 'p';
-    } else {
-      return !t.categoria || t.categoria === '';
-    }
-  });
+  // Filtrar não classificados baseado no tipo
+  const unclassified = type === 'transactions' 
+    ? transactions.filter(t => t.realizado === 'p')
+    : cardTransactions.filter(c => c.status === 'pending');
   
   if (unclassified.length === 0) return null;
 
   // Gerar sugestões para uma transação específica
   const loadSuggestions = (transactionId: string) => {
-    console.log('🤖 Carregando sugestões para transação:', transactionId);
-    
-    const transaction = unclassified.find(t => t.id === transactionId);
-    if (!transaction) {
-      console.error('❌ Transação não encontrada:', transactionId);
-      return;
-    }
+    const item = type === 'transactions'
+      ? transactions.find(t => t.id === transactionId)
+      : cardTransactions.find(c => c.id === transactionId);
+      
+    if (!item) return;
 
-    console.log('📋 Transação encontrada:', transaction.descricao_origem);
-    console.log('📊 Histórico disponível:', historicTransactions.length, 'transações');
+    const generatedSuggestions = generateSmartSuggestions(
+      item as Transaction | CardTransaction,
+      historicTransactions,
+      historicCardTransactions
+    );
 
-    // Gerar sugestões
-    const generatedSuggestions = generateSmartSuggestions(transaction, historicTransactions);
-    console.log('💡 Sugestões geradas:', generatedSuggestions.length);
-
-    // Atualizar estado
     setSuggestions(prev => ({
       ...prev,
       [transactionId]: generatedSuggestions
@@ -82,8 +82,6 @@ export function EnhancedUnclassifiedSection({
       ...prev,
       [transactionId]: true
     }));
-
-    console.log('✅ Estado atualizado para transação:', transactionId);
   };
 
   // Fechar sugestões
@@ -95,12 +93,12 @@ export function EnhancedUnclassifiedSection({
   };
 
   // Aplicar classificação rápida
-  const handleQuickClassification = async (transaction: Transaction | FutureTransaction, quickCategoryId: string) => {
+  const handleQuickClassification = async (item: Transaction | CardTransaction, quickCategoryId: string) => {
     if (!onApplyQuickClassification) return;
 
     try {
-      const classification = applyQuickClassification(transaction, quickCategoryId);
-      await onApplyQuickClassification(transaction.id, classification);
+      const classification = applyQuickClassification(item, quickCategoryId);
+      await onApplyQuickClassification(item.id, classification);
     } catch (error) {
       console.error('❌ Erro na classificação rápida:', error);
       alert('❌ Erro ao aplicar classificação rápida');
@@ -117,24 +115,25 @@ export function EnhancedUnclassifiedSection({
   }>) => {
     if (!onApplyBatchClassification) return;
     await onApplyBatchClassification(classifications);
+    setShowBatchModal(false);
   };
 
   const sectionConfig = {
     transactions: {
-      title: 'Não Classificados',
+      title: title || 'Não Classificados',
       icon: '⚠️',
-      color: 'yellow',
       bgClass: 'bg-yellow-900',
       borderClass: 'border-yellow-700',
-      hoverClass: 'hover:bg-yellow-800'
+      hoverClass: 'hover:bg-yellow-800',
+      description: 'lançamentos pendentes'
     },
-    futures: {
-      title: 'Cartões Não Classificados',
+    cards: {
+      title: title || 'Cartões Não Classificados',
       icon: '💳',
-      color: 'purple',
       bgClass: 'bg-purple-900',
       borderClass: 'border-purple-700',
-      hoverClass: 'hover:bg-purple-800'
+      hoverClass: 'hover:bg-purple-800',
+      description: 'transações pendentes'
     }
   };
 
@@ -143,7 +142,7 @@ export function EnhancedUnclassifiedSection({
   return (
     <>
       <div className={`${config.bgClass} rounded-lg shadow-lg overflow-hidden border ${config.borderClass} mb-4`}>
-        {/* Header da seção - SIMPLIFICADO */}
+        {/* Header da seção */}
         <div className="p-4">
           <button
             onClick={() => setIsExpanded(!isExpanded)}
@@ -152,7 +151,7 @@ export function EnhancedUnclassifiedSection({
             <span className="text-xl">{config.icon}</span>
             <div className="text-left flex-1">
               <p className="font-semibold text-gray-100">{config.title}</p>
-              <p className="text-xs text-gray-300">{unclassified.length} lançamentos pendentes</p>
+              <p className="text-xs text-gray-300">{unclassified.length} {config.description}</p>
             </div>
             <span className="text-gray-400">{isExpanded ? '▲' : '▼'}</span>
           </button>
@@ -184,12 +183,15 @@ export function EnhancedUnclassifiedSection({
 
             {/* Lista de Transações */}
             <div className="max-h-80 overflow-y-auto">
-              {unclassified.map((transaction, idx) => {
-                const transactionSuggestions = suggestions[transaction.id] || [];
-                const showingSuggestions = showSuggestions[transaction.id] || false;
+              {unclassified.map((item, idx) => {
+                const itemSuggestions = suggestions[item.id] || [];
+                const showingSuggestions = showSuggestions[item.id] || false;
+                const isTransaction = type === 'transactions';
+                const transaction = item as Transaction;
+                const cardTransaction = item as CardTransaction;
                 
                 return (
-                  <div key={`${transaction.id}-${idx}`} className={`px-3 py-3 border-b ${config.borderClass} last:border-b-0 ${config.hoverClass}`}>
+                  <div key={`${item.id}-${idx}`} className={`px-3 py-3 border-b ${config.borderClass} last:border-b-0 ${config.hoverClass}`}>
                     
                     {/* Linha Principal */}
                     <div className="flex items-center gap-3">
@@ -198,24 +200,24 @@ export function EnhancedUnclassifiedSection({
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
                           <p className="text-sm text-gray-100 font-medium leading-tight break-words">
-                            {transaction.descricao_origem || 'Sem descrição'}
+                            {item.descricao_origem || 'Sem descrição'}
                           </p>
                           
-                          {/* Badge de parcelas para futures */}
-                          {type === 'futures' && 'parcela_total' in transaction && transaction.parcela_total > 1 && (
-                            <span className="text-xs bg-blue-700 text-blue-200 px-2 py-1 rounded">
-                              {transaction.parcela_atual}/{transaction.parcela_total}
+                          {/* Badge da fatura para cards */}
+                          {!isTransaction && (
+                            <span className="text-xs bg-purple-700 text-purple-200 px-2 py-1 rounded">
+                              {cardTransaction.fatura_id}
                             </span>
                           )}
                         </div>
                         
-                        <div className="text-xs text-gray-300 truncate">
-                          {formatDate('data' in transaction ? transaction.data : transaction.data_vencimento)} • 
-                          {transaction.origem || 'N/A'} • 
-                          {transaction.cc || 'N/A'}
-                          {type === 'transactions' && (transaction as Transaction).is_from_reconciliation && (
+                        <div className="text-xs text-gray-300">
+                          {formatDate(isTransaction ? transaction.data : cardTransaction.data_transacao)} • 
+                          {item.origem || 'N/A'} • 
+                          {item.cc || 'N/A'}
+                          {isTransaction && transaction.is_from_reconciliation && (
                             <span className="text-blue-300 ml-1">
-                              🔗 {(transaction as Transaction).linked_future_group?.split('_')[0] || 'REC'}
+                              🔗 Reconciliada
                             </span>
                           )}
                         </div>
@@ -223,8 +225,8 @@ export function EnhancedUnclassifiedSection({
                       
                       {/* COLUNA 2: Valor */}
                       <div className="flex-shrink-0 text-right min-w-[70px]">
-                        <span className={`font-medium text-sm block ${transaction.valor >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                          {transaction.valor >= 0 ? '+' : ''}R$ {formatCurrency(Math.abs(transaction.valor || 0))}
+                        <span className={`font-medium text-sm block ${item.valor >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          {item.valor >= 0 ? '+' : ''}R$ {formatCurrency(Math.abs(item.valor || 0))}
                         </span>
                       </div>
                       
@@ -235,40 +237,28 @@ export function EnhancedUnclassifiedSection({
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            console.log('🤖 Clique no botão de sugestões para:', transaction.id);
-                            if (showSuggestions[transaction.id]) {
-                              closeSuggestions(transaction.id);
+                            if (showSuggestions[item.id]) {
+                              closeSuggestions(item.id);
                             } else {
-                              loadSuggestions(transaction.id);
+                              loadSuggestions(item.id);
                             }
                           }}
                           className={`w-7 h-7 rounded text-xs transition-colors flex items-center justify-center ${
-                            showSuggestions[transaction.id] 
+                            showSuggestions[item.id] 
                               ? 'bg-green-500 text-white' 
                               : 'bg-green-600 hover:bg-green-500 text-white'
                           }`}
-                          title={showSuggestions[transaction.id] ? "Fechar sugestões" : "Sugestões IA"}
+                          title={showSuggestions[item.id] ? "Fechar sugestões" : "Sugestões IA"}
                         >
-                          {showSuggestions[transaction.id] ? '❌' : '🤖'}
+                          {showSuggestions[item.id] ? '❌' : '🤖'}
                         </button>
                         
                         {/* Botão de Reconciliação (apenas para transactions) */}
-                        {onReconcileTransaction && type === 'transactions' && (
+                        {onReconcileTransaction && isTransaction && canReconcile && !transaction.is_from_reconciliation && (
                           <button
-                            onClick={() => onReconcileTransaction(transaction as Transaction)}
-                            className={`w-7 h-7 rounded text-xs transition-colors flex items-center justify-center ${
-                              availableGroupsCount > 0 && !(transaction as Transaction).is_from_reconciliation
-                                ? 'bg-green-600 hover:bg-green-500 text-white shadow-sm'
-                                : 'bg-gray-600 text-gray-400 cursor-not-allowed'
-                            }`}
-                            disabled={availableGroupsCount === 0 || (transaction as Transaction).is_from_reconciliation}
-                            title={
-                              (transaction as Transaction).is_from_reconciliation 
-                                ? 'Já reconciliada'
-                                : availableGroupsCount > 0 
-                                  ? `Reconciliar (${availableGroupsCount} grupos)`
-                                  : 'Nenhum grupo disponível'
-                            }
+                            onClick={() => onReconcileTransaction(transaction)}
+                            className="w-7 h-7 bg-green-600 hover:bg-green-500 text-white rounded text-xs transition-colors flex items-center justify-center shadow-sm"
+                            title="Reconciliar com fatura"
                           >
                             🔗
                           </button>
@@ -276,21 +266,27 @@ export function EnhancedUnclassifiedSection({
                         
                         {/* Botão de Edição */}
                         <button
-                          onClick={() => onEditTransaction(transaction)}
+                          onClick={() => {
+                            if (isTransaction && onEditTransaction) {
+                              onEditTransaction(transaction);
+                            } else if (!isTransaction && onEditCardTransaction) {
+                              onEditCardTransaction(cardTransaction);
+                            }
+                          }}
                           className="w-7 h-7 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs transition-colors flex items-center justify-center shadow-sm"
-                          title="Editar transação"
+                          title="Editar/Classificar"
                         >
                           ✏️
                         </button>
                       </div>
                     </div>
 
-                    {/* Botões de Ação Rápida (expandidos) */}
+                    {/* Botões de Ação Rápida */}
                     <div className="mt-2 flex flex-wrap gap-1">
                       {QUICK_ACTION_CATEGORIES.map(category => (
                         <button
                           key={category.id}
-                          onClick={() => handleQuickClassification(transaction, category.id)}
+                          onClick={() => handleQuickClassification(item as Transaction | CardTransaction, category.id)}
                           className={`px-2 py-1 ${category.color} text-white rounded text-xs transition-colors hover:scale-105 flex items-center gap-1`}
                           title={`${category.title}: ${category.conta} > ${category.categoria} > ${category.subtipo}`}
                         >
@@ -301,36 +297,35 @@ export function EnhancedUnclassifiedSection({
                     </div>
 
                     {/* Sugestões Inteligentes */}
-                    {showingSuggestions && transactionSuggestions.length > 0 && (
+                    {showingSuggestions && itemSuggestions.length > 0 && (
                       <div className="mt-3 bg-gray-800 rounded-lg p-3 border border-gray-600">
                         <div className="flex items-center justify-between mb-2">
                           <h5 className="text-xs font-medium text-gray-300 flex items-center gap-1">
                             <span>🤖</span>
-                            Sugestões Inteligentes ({transactionSuggestions.length})
+                            Sugestões Inteligentes ({itemSuggestions.length})
                           </h5>
                           <button
-                            onClick={() => closeSuggestions(transaction.id)}
+                            onClick={() => closeSuggestions(item.id)}
                             className="text-gray-400 hover:text-gray-200 text-xs"
                           >
                             Fechar ❌
                           </button>
                         </div>
                         <div className="space-y-1">
-                          {transactionSuggestions.map((suggestion, suggIdx) => (
+                          {itemSuggestions.map((suggestion, suggIdx) => (
                             <button
                               key={suggIdx}
                               onClick={() => {
-                                console.log('✅ Aplicando sugestão:', suggestion);
                                 if (onApplyQuickClassification) {
                                   const classification = {
                                     conta: suggestion.conta,
                                     categoria: suggestion.categoria,
                                     subtipo: suggestion.subtipo,
-                                    descricao: transaction.descricao_origem || 'Sem descrição',
-                                    realizado: type === 'transactions' ? 's' : undefined
+                                    descricao: item.descricao_origem || 'Sem descrição',
+                                    realizado: isTransaction ? 's' : undefined
                                   };
-                                  onApplyQuickClassification(transaction.id, classification);
-                                  closeSuggestions(transaction.id);
+                                  onApplyQuickClassification(item.id, classification);
+                                  closeSuggestions(item.id);
                                 }
                               }}
                               className="w-full text-left p-2 hover:bg-gray-700 rounded text-xs transition-colors border border-gray-600"
@@ -356,18 +351,11 @@ export function EnhancedUnclassifiedSection({
                             </button>
                           ))}
                         </div>
-                        
-                        {/* Aviso se não há histórico suficiente */}
-                        {historicTransactions.length < 10 && (
-                          <div className="mt-2 text-xs text-yellow-400 bg-yellow-900/20 rounded p-2">
-                            💡 Dica: Importe mais transações históricas para sugestões mais precisas (atual: {historicTransactions.length})
-                          </div>
-                        )}
                       </div>
                     )}
 
                     {/* Mensagem quando não há sugestões */}
-                    {showingSuggestions && transactionSuggestions.length === 0 && (
+                    {showingSuggestions && itemSuggestions.length === 0 && (
                       <div className="mt-3 bg-gray-800 rounded-lg p-3 border border-gray-600">
                         <div className="flex items-center justify-between mb-2">
                           <h5 className="text-xs font-medium text-gray-300 flex items-center gap-1">
@@ -375,7 +363,7 @@ export function EnhancedUnclassifiedSection({
                             Sugestões Inteligentes
                           </h5>
                           <button
-                            onClick={() => closeSuggestions(transaction.id)}
+                            onClick={() => closeSuggestions(item.id)}
                             className="text-gray-400 hover:text-gray-200 text-xs"
                           >
                             Fechar ❌
@@ -385,14 +373,9 @@ export function EnhancedUnclassifiedSection({
                           <p className="text-gray-400 text-xs">
                             {historicTransactions.length === 0 
                               ? "📚 Nenhum histórico disponível para gerar sugestões"
-                              : "🔍 Nenhuma sugestão encontrada para esta transação"
+                              : "🔍 Nenhuma sugestão encontrada"
                             }
                           </p>
-                          {historicTransactions.length === 0 && (
-                            <p className="text-yellow-400 text-xs mt-1">
-                              💡 Classifique algumas transações manualmente primeiro
-                            </p>
-                          )}
                         </div>
                       </div>
                     )}
@@ -409,8 +392,9 @@ export function EnhancedUnclassifiedSection({
         <BatchClassificationModal
           isOpen={showBatchModal}
           onClose={() => setShowBatchModal(false)}
-          unclassifiedTransactions={unclassified}
+          unclassifiedTransactions={unclassified as (Transaction | CardTransaction)[]}
           historicTransactions={historicTransactions}
+          historicCardTransactions={historicCardTransactions}
           onApplyBatch={handleBatchClassification}
         />
       )}

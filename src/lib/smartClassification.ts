@@ -1,6 +1,7 @@
 // lib/smartClassification.ts - SERVIÇO DE CLASSIFICAÇÃO INTELIGENTE
 
 import { Transaction, FutureTransaction } from '@/types';
+import { CardTransaction } from '@/hooks/useCardTransactions';
 import { categoriesPJ, categoriesPF, categoriesCONC } from '@/lib/categories';
 
 /**

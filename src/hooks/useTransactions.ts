@@ -1,8 +1,21 @@
-// hooks/useTransactions.ts - VERSÃO ATUALIZADA COM RECONCILIAÇÃO
+// hooks/useTransactions.ts - VERSÃO ATUALIZADA COM RECONCILIAÇÃO SIMPLIFICADA
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Transaction } from '@/types';
+import { CardTransaction } from './useCardTransactions';
+import { categoriesPJ, categoriesPF, categoriesCONC } from '@/lib/categories';
+
+// ===== FUNÇÃO HELPER: Determinar conta baseada na categoria =====
+const getContaFromCategoria = (categoria: string): string => {
+  // Verificar em qual grupo a categoria pertence
+  if (Object.keys(categoriesPJ).includes(categoria)) return 'PJ';
+  if (Object.keys(categoriesPF).includes(categoria)) return 'PF';
+  if (Object.keys(categoriesCONC).includes(categoria)) return 'CONC.';
+  
+  // Default para PF se não encontrar
+  return 'PF';
+};
 
 export function useTransactions() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -58,15 +71,15 @@ export function useTransactions() {
         mes: transaction.mes,
         data: transaction.data,
         descricao_origem: transaction.descricao_origem,
-        subtipo: transaction.subtipo,
-        categoria: transaction.categoria,
-        descricao: transaction.descricao,
+        subtipo: transaction.subtipo || '',
+        categoria: transaction.categoria || '',
+        descricao: transaction.descricao || transaction.descricao_origem,
         valor: transaction.valor,
         origem: transaction.origem,
         cc: transaction.cc,
         realizado: transaction.realizado,
-        conta: transaction.conta,
-        // ===== NOVOS CAMPOS PARA RECONCILIAÇÃO =====
+        conta: transaction.conta || '',
+        // Campos de reconciliação
         linked_future_group: transaction.linked_future_group || null,
         is_from_reconciliation: transaction.is_from_reconciliation || false,
         future_subscription_id: transaction.future_subscription_id || null,
@@ -75,7 +88,7 @@ export function useTransactions() {
 
       console.log('📝 Total de transações para inserir:', transactionsToInsert.length);
 
-      // ETAPA 1: Verificar quantas já existem (para contar duplicatas)
+      // Verificar duplicatas
       const existingIds = transactionsToInsert.map(t => t.id);
       const { data: existingTransactions, error: checkError } = await supabase
         .from('transactions')
@@ -97,8 +110,8 @@ export function useTransactions() {
       console.log('  ✅ Novas:', newCount);
       console.log('  🔄 Duplicatas:', duplicatesCount);
 
-      // ETAPA 2: Inserir com upsert (funciona independente de duplicatas)
-      const { data: _, error: supabaseError } = await supabase
+      // Inserir com upsert
+      const { error: supabaseError } = await supabase
         .from('transactions')
         .upsert(transactionsToInsert, { 
           onConflict: 'id',
@@ -111,7 +124,7 @@ export function useTransactions() {
         throw supabaseError;
       }
 
-      // ETAPA 3: Atualizar estado local (apenas com novas)
+      // Atualizar estado local
       setTransactions(prev => {
         const prevIdSet = new Set(prev.map(t => t.id));
         const newOnes = newTransactions.filter(t => !prevIdSet.has(t.id));
@@ -121,7 +134,6 @@ export function useTransactions() {
 
       console.log('✅ addTransactions concluído com sucesso');
       
-      // RETORNAR ESTATÍSTICAS SIMPLES E CONFIÁVEIS
       return {
         success: true,
         stats: {
@@ -158,7 +170,6 @@ export function useTransactions() {
         cc: updatedTransaction.cc,
         realizado: updatedTransaction.realizado,
         conta: updatedTransaction.conta,
-        // ===== NOVOS CAMPOS PARA RECONCILIAÇÃO =====
         linked_future_group: updatedTransaction.linked_future_group || null,
         is_from_reconciliation: updatedTransaction.is_from_reconciliation || false,
         future_subscription_id: updatedTransaction.future_subscription_id || null,
@@ -192,11 +203,133 @@ export function useTransactions() {
     }
   };
 
-  // ===== NOVA FUNÇÃO: Marcar transação como reconciliada =====
-  const markAsReconciled = async (transaction: Transaction, futureGroup: string) => {
+  // ===== FUNÇÃO HELPER: Determinar conta baseada na categoria =====
+  const getContaFromCategoria = (categoria: string): string => {
+    // Importar categorias (você pode mover isso para o topo do arquivo)
+    const { categoriesPJ, categoriesPF, categoriesCONC } = require('@/lib/categories');
+    
+    // Verificar em qual grupo a categoria pertence
+    if (Object.keys(categoriesPJ).includes(categoria)) return 'PJ';
+    if (Object.keys(categoriesPF).includes(categoria)) return 'PF';
+    if (Object.keys(categoriesCONC).includes(categoria)) return 'CONC.';
+    
+    // Default para PF se não encontrar
+    return 'PF';
+  };
+
+  // ===== NOVA FUNÇÃO: Criar transactions a partir de card_transactions =====
+  const createTransactionsFromCards = async (
+    cardTransactions: CardTransaction[],
+    linkedPaymentId: string,
+    faturaId: string
+  ): Promise<{ success: boolean; created: number; errors: string[] }> => {
+    try {
+      console.log('🔄 Criando transactions a partir de card_transactions...');
+      console.log('💳 Cards:', cardTransactions.length);
+      console.log('🔗 Payment ID:', linkedPaymentId);
+      console.log('📋 Fatura:', faturaId);
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error('Usuário não autenticado');
+      }
+
+      // Criar transactions baseadas nas card_transactions
+      const newTransactions: Transaction[] = cardTransactions.map(card => {
+        // Gerar ID único para a transaction
+        const transactionId = `REC_${card.id}`;
+        
+        // Determinar o mês baseado na data (formato AAMM)
+        const dateParts = card.data_transacao.split('-');
+        const mes = dateParts.length === 3 
+          ? `${dateParts[0].slice(-2)}${dateParts[1]}` 
+          : '';
+
+        // Determinar conta baseada na categoria
+        const conta = card.categoria ? getContaFromCategoria(card.categoria) : '';
+
+        return {
+          id: transactionId,
+          mes: mes,
+          data: card.data_transacao,
+          descricao_origem: card.descricao_origem,
+          subtipo: card.subtipo || '',
+          categoria: card.categoria || '',
+          descricao: card.descricao_classificada || card.descricao_origem,
+          valor: card.valor,
+          origem: card.origem,
+          cc: card.cc,
+          realizado: 's', // Marcar como realizado
+          conta: conta, // Conta determinada pela categoria
+          // Metadata de reconciliação
+          linked_future_group: faturaId,
+          is_from_reconciliation: true,
+          future_subscription_id: linkedPaymentId,
+          reconciliation_metadata: JSON.stringify({
+            card_transaction_id: card.id,
+            fatura_id: faturaId,
+            payment_id: linkedPaymentId,
+            reconciled_at: new Date().toISOString()
+          })
+        };
+      });
+
+      console.log('📝 Preparadas', newTransactions.length, 'novas transactions');
+
+      // Inserir em lotes
+      const BATCH_SIZE = 50;
+      let createdCount = 0;
+      const errors: string[] = [];
+
+      for (let i = 0; i < newTransactions.length; i += BATCH_SIZE) {
+        const batch = newTransactions.slice(i, i + BATCH_SIZE);
+        
+        const batchToInsert = batch.map(t => ({
+          ...t,
+          user_id: user.id
+        }));
+
+        const { error: insertError } = await supabase
+          .from('transactions')
+          .insert(batchToInsert);
+
+        if (insertError) {
+          console.error('❌ Erro ao inserir batch:', insertError);
+          errors.push(`Erro no batch ${i/BATCH_SIZE + 1}: ${insertError.message}`);
+        } else {
+          createdCount += batch.length;
+        }
+      }
+
+      // Atualizar estado local
+      await loadTransactions();
+
+      console.log('✅ Criação concluída:', createdCount, 'transactions criadas');
+
+      return {
+        success: createdCount > 0,
+        created: createdCount,
+        errors
+      };
+
+    } catch (err) {
+      console.error('❌ Erro ao criar transactions:', err);
+      return {
+        success: false,
+        created: 0,
+        errors: [err instanceof Error ? err.message : 'Erro desconhecido']
+      };
+    }
+  };
+
+  // ===== FUNÇÃO ATUALIZADA: Marcar transação como reconciliada =====
+  const markAsReconciled = async (
+    transaction: Transaction, 
+    faturaId: string
+  ): Promise<{ success: boolean }> => {
     try {
       console.log('🔗 Marcando transação como reconciliada:', transaction.id);
-      console.log('📋 Grupo de futures:', futureGroup);
+      console.log('📋 Fatura:', faturaId);
 
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
@@ -205,13 +338,13 @@ export function useTransactions() {
 
       const reconciliationMetadata = {
         reconciled_at: new Date().toISOString(),
-        future_group: futureGroup,
+        fatura_id: faturaId,
         reconciled_by: 'manual'
       };
 
       const updatedTransaction: Transaction = {
         ...transaction,
-        linked_future_group: futureGroup,
+        linked_future_group: faturaId,
         is_from_reconciliation: true,
         reconciliation_metadata: JSON.stringify(reconciliationMetadata),
         realizado: 's' // Marcar como realizado
@@ -225,6 +358,51 @@ export function useTransactions() {
     } catch (err) {
       console.error('❌ Erro ao marcar como reconciliada:', err);
       throw err;
+    }
+  };
+
+  // ===== NOVA FUNÇÃO: Executar reconciliação completa =====
+  const executeReconciliation = async (
+    paymentTransaction: Transaction,
+    cardTransactions: CardTransaction[],
+    faturaId: string
+  ): Promise<{
+    success: boolean;
+    createdTransactions: number;
+    errors: string[];
+  }> => {
+    try {
+      console.log('🔗 Executando reconciliação completa...');
+
+      // ETAPA 1: Marcar pagamento como reconciliado
+      await markAsReconciled(paymentTransaction, faturaId);
+
+      // ETAPA 2: Criar transactions a partir dos cards
+      const createResult = await createTransactionsFromCards(
+        cardTransactions,
+        paymentTransaction.id,
+        faturaId
+      );
+
+      if (!createResult.success) {
+        throw new Error(`Falha ao criar transactions: ${createResult.errors.join(', ')}`);
+      }
+
+      console.log('✅ Reconciliação completa executada com sucesso');
+
+      return {
+        success: true,
+        createdTransactions: createResult.created,
+        errors: createResult.errors
+      };
+
+    } catch (err) {
+      console.error('❌ Erro na reconciliação completa:', err);
+      return {
+        success: false,
+        createdTransactions: 0,
+        errors: [err instanceof Error ? err.message : 'Erro desconhecido']
+      };
     }
   };
 
@@ -281,12 +459,15 @@ export function useTransactions() {
   };
 
   // Dividir uma transação em múltiplas partes
-  const splitTransaction = async (originalTransaction: Transaction, parts: Array<{
-    categoria: string;
-    subtipo: string;
-    descricao: string;
-    valor: number;
-  }>) => {
+  const splitTransaction = async (
+    originalTransaction: Transaction, 
+    parts: Array<{
+      categoria: string;
+      subtipo: string;
+      descricao: string;
+      valor: number;
+    }>
+  ) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
@@ -331,9 +512,8 @@ export function useTransactions() {
         valor: part.valor,
         origem: originalTransaction.origem,
         cc: originalTransaction.cc,
-        realizado: 's', // Automaticamente marca como realizado
+        realizado: 's',
         conta: account,
-        // Manter dados de reconciliação se existirem
         linked_future_group: originalTransaction.linked_future_group,
         is_from_reconciliation: originalTransaction.is_from_reconciliation,
         future_subscription_id: originalTransaction.future_subscription_id,
@@ -353,10 +533,8 @@ export function useTransactions() {
 
       // ETAPA 3: Atualizar estado local
       setTransactions(prev => {
-        // Remove a transação original
         const withoutOriginal = prev.filter(t => t.id !== originalTransaction.id);
         
-        // Adiciona as novas transações
         const newTransactionObjects: Transaction[] = newTransactions.map(nt => ({
           id: nt.id,
           mes: nt.mes,
@@ -415,7 +593,9 @@ export function useTransactions() {
     deleteTransaction,
     clearAllTransactions,
     splitTransaction,
-    markAsReconciled, // ===== NOVA FUNÇÃO =====
+    markAsReconciled,
+    createTransactionsFromCards, // ===== NOVA FUNÇÃO =====
+    executeReconciliation, // ===== NOVA FUNÇÃO COMPLETA =====
     refreshTransactions: loadTransactions
   };
 }

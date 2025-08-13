@@ -1,4 +1,4 @@
-// types/index.ts - VERSÃO ATUALIZADA COM RECONCILIAÇÃO
+// types/index.ts - VERSÃO LIMPA SEM FUTURE TRANSACTIONS
 
 export interface Transaction {
   id: string;
@@ -14,92 +14,14 @@ export interface Transaction {
   realizado: string;
   conta: string;
   
-  // ===== NOVOS CAMPOS PARA RECONCILIAÇÃO =====
-  linked_future_group?: string;         // Grupo de futures reconciliado
+  // ===== CAMPOS PARA RECONCILIAÇÃO =====
+  linked_future_group?: string;         // Grupo de faturas reconciliado
   is_from_reconciliation?: boolean;     // Veio de reconciliação?
-  future_subscription_id?: string;      // ID da assinatura original
+  future_subscription_id?: string;      // ID do pagamento original
   reconciliation_metadata?: string;     // JSON com dados extras
 }
 
-export interface FutureTransaction {
-  id: string;
-  original_transaction_id?: string; // Link para transação original (para parcelas)
-  mes_vencimento: string; // Formato AAMM
-  data_vencimento: string; // Formato ISO YYYY-MM-DD
-  descricao_origem: string;
-  categoria: string;
-  subtipo: string;
-  descricao: string;
-  valor: number;
-  origem: string;
-  cc: string;
-  parcela_atual: number;
-  parcela_total: number;
-  estabelecimento: string;
-  status: 'projected' | 'confirmed' | 'paid';
-  conta?: string; // Adicionando campo conta que pode ser usado
-  
-  // ===== NOVOS CAMPOS PARA RECONCILIAÇÃO =====
-  subscription_fingerprint?: string;     // "netflix_29.90_monthly"
-  original_future_id?: string;           // ID da projeção original
-  reconciliation_group?: string;         // "NUBANK_072025"  
-  is_reconciled?: boolean;               // Foi reconciliada?
-  fatura_fechada_id?: string;           // ID da fatura oficial
-  valor_original?: number;               // Valor antes de ajustes
-  reconciled_at?: string;                // Quando foi reconciliada
-  reconciled_with_transaction_id?: string; // Com qual transaction
-}
-
-// ===== NOVAS INTERFACES PARA RECONCILIAÇÃO =====
-
-export interface SubscriptionTracking {
-  id: string;
-  user_id: string;
-  fingerprint: string;
-  estabelecimento: string;
-  valor: number;
-  last_reconciled_parcela: number;
-  total_parcelas: number;
-  next_expected_month: string;
-  transaction_pattern: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ReconciliationGroup {
-  groupId: string;
-  futures: FutureTransaction[];
-  totalValue: number;
-  description: string;
-  month: string;
-  estabelecimentos: string[]; // Lista de estabelecimentos únicos
-  count: number; // Número de transações
-}
-
-export interface FaturaAnalysis {
-  matched: FutureTransaction[];
-  changed: Array<{future: FutureTransaction, newValue: number}>;
-  removed: FutureTransaction[];
-  added: Transaction[];
-  totalDifference: number;
-}
-
-export interface ReconciliationModalProps {
-  transaction: Transaction | null;
-  isOpen: boolean;
-  onClose: () => void;
-  onConfirm: (selectedGroup: ReconciliationGroup) => void;
-  availableGroups: ReconciliationGroup[];
-}
-
-export interface FaturaAnalysisModalProps {
-  isOpen: boolean;
-  analysisData: FaturaAnalysis | null;
-  onClose: () => void;
-  onApplyCorrections: (corrections: FaturaAnalysis) => void;
-}
-
-// ===== INTERFACES EXISTENTES MANTIDAS =====
+// ===== INTERFACES PRINCIPAIS =====
 
 export interface CategoryData {
   subtipos: string[];
@@ -114,8 +36,15 @@ export interface Categories {
 export interface BankUploadProps {
   isOpen: boolean;
   onClose: () => void;
-  onTransactionsImported: (transactions: Transaction[]) => Promise<{ success: boolean; stats?: { total: number; added: number; duplicates: number } } | void>;
-  onFutureTransactionsImported?: (futureTransactions: FutureTransaction[], referenceMes: string) => Promise<{ success: boolean; stats?: { total: number; added: number; duplicates: number } } | void>;
+  onTransactionsImported: (transactions: Transaction[]) => Promise<{ 
+    success: boolean; 
+    stats?: { 
+      total: number; 
+      added: number; 
+      duplicates: number 
+    } 
+  } | void>;
+  onCardTransactionsImported?: (transactions: any[]) => Promise<any>;
 }
 
 export interface ParsedTransaction {

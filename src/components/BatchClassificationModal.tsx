@@ -1,7 +1,8 @@
-// components/BatchClassificationModal.tsx - MODAL DE CLASSIFICAÇÃO EM LOTE
+// components/BatchClassificationModal.tsx - MODAL DE CLASSIFICAÇÃO EM LOTE ATUALIZADO
 
 import React, { useState, useEffect } from 'react';
-import { Transaction, FutureTransaction } from '@/types';
+import { Transaction } from '@/types';
+import { CardTransaction } from '@/hooks/useCardTransactions';
 import { categoriesPJ, categoriesPF, categoriesCONC, getCategoriesForAccount } from '@/lib/categories';
 import { 
   BatchClassificationItem, 
@@ -14,8 +15,9 @@ import { formatCurrency, formatDate } from '@/lib/utils';
 interface BatchClassificationModalProps {
   isOpen: boolean;
   onClose: () => void;
-  unclassifiedTransactions: (Transaction | FutureTransaction)[];
+  unclassifiedTransactions: (Transaction | CardTransaction)[];
   historicTransactions: Transaction[];
+  historicCardTransactions?: CardTransaction[];
   onApplyBatch: (classifications: Array<{
     id: string;
     conta: string;
@@ -30,6 +32,7 @@ export function BatchClassificationModal({
   onClose,
   unclassifiedTransactions,
   historicTransactions,
+  historicCardTransactions = [],
   onApplyBatch
 }: BatchClassificationModalProps) {
   const [batchItems, setBatchItems] = useState<BatchClassificationItem[]>([]);
@@ -42,13 +45,22 @@ export function BatchClassificationModal({
   useEffect(() => {
     if (isOpen && unclassifiedTransactions.length > 0) {
       console.log('🔄 Preparando classificação em lote...');
-      const prepared = prepareBatchClassification(unclassifiedTransactions, historicTransactions);
+      const prepared = prepareBatchClassification(
+        unclassifiedTransactions, 
+        historicTransactions,
+        historicCardTransactions
+      );
       setBatchItems(prepared);
       setCurrentIndex(0);
       setErrors([]);
       setSelectedAll(false);
     }
-  }, [isOpen, unclassifiedTransactions, historicTransactions]);
+  }, [isOpen, unclassifiedTransactions, historicTransactions, historicCardTransactions]);
+
+  // Detectar tipo de transação
+  const isCardTransaction = (item: Transaction | CardTransaction): item is CardTransaction => {
+    return 'fatura_id' in item;
+  };
 
   // Atualizar item específico
   const updateItem = (index: number, field: keyof BatchClassificationItem, value: any) => {
@@ -190,12 +202,21 @@ export function BatchClassificationModal({
               <div className="bg-gradient-to-r from-blue-900 to-blue-800 rounded-lg p-4 mb-6 border border-blue-700">
                 <h4 className="font-medium text-blue-100 mb-3">
                   📋 Transação {currentIndex + 1}/{batchItems.length}
+                  {isCardTransaction(currentItem.transaction) && (
+                    <span className="ml-2 text-xs bg-purple-700 text-purple-200 px-2 py-1 rounded">
+                      {currentItem.transaction.fatura_id}
+                    </span>
+                  )}
                 </h4>
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
                     <label className="text-blue-300">Data:</label>
                     <p className="text-blue-100">
-                      {formatDate('data' in currentItem.transaction ? currentItem.transaction.data : currentItem.transaction.data_vencimento)}
+                      {formatDate(
+                        isCardTransaction(currentItem.transaction) 
+                          ? currentItem.transaction.data_transacao 
+                          : currentItem.transaction.data
+                      )}
                     </p>
                   </div>
                   <div>
@@ -215,7 +236,7 @@ export function BatchClassificationModal({
                     <p className="text-blue-100">{currentItem.transaction.origem}</p>
                   </div>
                   <div>
-                    <label className="text-blue-300">CC:</label>
+                    <label className="text-blue-300">Banco/Cartão:</label>
                     <p className="text-blue-100">{currentItem.transaction.cc}</p>
                   </div>
                 </div>
@@ -227,7 +248,7 @@ export function BatchClassificationModal({
                   <h4 className="font-medium text-green-100 mb-3 flex items-center gap-2">
                     <span>🤖</span>
                     Sugestão Inteligente
-                    <span className="text-xs bg-green-700 px-2 py-1 rounded">
+                    <span className="text-xs bg-green-700 text-green-100 px-2 py-1 rounded">
                       {Math.round(currentItem.suggestedClassification.confidence * 100)}% confiança
                     </span>
                   </h4>
@@ -340,7 +361,7 @@ export function BatchClassificationModal({
                 
                 <div className="text-center">
                   <p className="text-gray-300 text-sm">
-                    Navegação por teclado: ← → ou Tab/Shift+Tab
+                    Use ← → para navegar
                   </p>
                 </div>
                 

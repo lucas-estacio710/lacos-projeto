@@ -1,4 +1,4 @@
-// components/BatchClassificationModal.tsx - MODAL DE CLASSIFICAÇÃO EM LOTE ATUALIZADO
+// components/BatchClassificationModal.tsx - MODAL DE CLASSIFICAÇÃO EM LOTE ATUALIZADO COM BOTÃO LIMPAR
 
 import React, { useState, useEffect } from 'react';
 import { Transaction } from '@/types';
@@ -44,11 +44,10 @@ export function BatchClassificationModal({
   // Preparar dados quando modal abre
   useEffect(() => {
     if (isOpen && unclassifiedTransactions.length > 0) {
-      console.log('🔄 Preparando classificação em lote...');
+      console.log('📄 Preparando classificação em lote...');
       const prepared = prepareBatchClassification(
         unclassifiedTransactions, 
-        historicTransactions,
-        historicCardTransactions
+        historicTransactions
       );
       setBatchItems(prepared);
       setCurrentIndex(0);
@@ -60,6 +59,25 @@ export function BatchClassificationModal({
   // Detectar tipo de transação
   const isCardTransaction = (item: Transaction | CardTransaction): item is CardTransaction => {
     return 'fatura_id' in item;
+  };
+
+  // ===== FUNÇÃO PARA LIMPAR CLASSIFICAÇÃO =====
+  const clearCurrentClassification = () => {
+    setBatchItems(prev => prev.map((item, index) => 
+      index === currentIndex 
+        ? {
+            ...item,
+            selectedConta: '',
+            selectedCategoria: '',
+            selectedSubtipo: '',
+            // Mantém selectedDescricao
+          }
+        : item
+    ));
+    
+    // Limpa erros e mostra feedback
+    setErrors([]);
+    console.log('🗑️ Classificação limpa para transação', currentIndex + 1);
   };
 
   // Atualizar item específico
@@ -128,17 +146,55 @@ export function BatchClassificationModal({
     }
   };
 
+  // ===== VALIDAÇÃO ATUALIZADA PARA ACEITAR VAZIO =====
+  const validateBatchClassificationUpdated = (items: BatchClassificationItem[]): {
+    valid: BatchClassificationItem[];
+    invalid: BatchClassificationItem[];
+    errors: string[];
+  } => {
+    const valid: BatchClassificationItem[] = [];
+    const invalid: BatchClassificationItem[] = [];
+    const errors: string[] = [];
+
+    items.forEach((item, index) => {
+      const hasAnyField = item.selectedConta || item.selectedCategoria || item.selectedSubtipo;
+      const hasAllRequiredFields = item.selectedConta && item.selectedCategoria && item.selectedSubtipo;
+      
+      // Aceita completamente vazio OU completamente preenchido
+      if (!hasAnyField || hasAllRequiredFields) {
+        valid.push(item);
+      } else {
+        invalid.push(item);
+        errors.push(`Transação ${index + 1}: Preencha todos os campos ou deixe todos vazios`);
+      }
+    });
+
+    return { valid, invalid, errors };
+  };
+
   // Submeter classificações
   const handleSubmit = async () => {
-    const validation = validateBatchClassification(batchItems);
+    const validation = validateBatchClassificationUpdated(batchItems);
     
     if (validation.invalid.length > 0) {
       setErrors(validation.errors);
-      alert(`❌ ${validation.invalid.length} transações com dados incompletos`);
+      alert(`❌ ${validation.invalid.length} transações com problemas. Verifique os campos.`);
       return;
     }
 
-    const classifications = validation.valid.map(item => ({
+    // Separar classificadas vs não classificadas
+    const classified = validation.valid.filter(item => item.selectedConta && item.selectedCategoria && item.selectedSubtipo);
+    const unclassified = validation.valid.filter(item => !item.selectedConta || !item.selectedCategoria || !item.selectedSubtipo);
+    
+    // Confirmar se nenhuma será classificada
+    if (classified.length === 0 && unclassified.length > 0) {
+      const confirm = window.confirm(
+        `⚠️ Todas as ${unclassified.length} transações ficarão não classificadas. Tem certeza?`
+      );
+      if (!confirm) return;
+    }
+
+    const classifications = classified.map(item => ({
       id: item.id,
       conta: item.selectedConta!,
       categoria: item.selectedCategoria!,
@@ -148,8 +204,11 @@ export function BatchClassificationModal({
 
     setLoading(true);
     try {
-      await onApplyBatch(classifications);
-      alert(`✅ ${classifications.length} transações classificadas com sucesso!`);
+      if (classifications.length > 0) {
+        await onApplyBatch(classifications);
+      }
+      
+      alert(`✅ ${classifications.length} transações classificadas! ${unclassified.length} deixadas não classificadas.`);
       onClose();
     } catch (error) {
       console.error('❌ Erro na classificação em lote:', error);
@@ -163,6 +222,13 @@ export function BatchClassificationModal({
 
   const currentItem = batchItems[currentIndex];
   const progress = batchItems.length > 0 ? ((currentIndex + 1) / batchItems.length) * 100 : 0;
+
+  // Calcular resumo
+  const classificationSummary = {
+    classified: batchItems.filter(item => item.selectedConta && item.selectedCategoria && item.selectedSubtipo).length,
+    unclassified: batchItems.filter(item => !item.selectedConta || !item.selectedCategoria || !item.selectedSubtipo).length,
+    withSuggestion: batchItems.filter(item => item.suggestedClassification).length
+  };
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -267,12 +333,43 @@ export function BatchClassificationModal({
                 </div>
               )}
 
+              {/* Status da classificação atual */}
+              {!currentItem.selectedCategoria ? (
+                <div className="bg-yellow-900/30 border border-yellow-700 rounded-lg p-2 mb-3">
+                  <div className="flex items-center gap-2 text-yellow-200 text-sm">
+                    ⚠️ <span>Lançamento será salvo como <strong>não classificado</strong></span>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-blue-900/30 border border-blue-700 rounded-lg p-2 mb-3">
+                  <div className="flex items-center gap-2 text-blue-200 text-sm">
+                    📋 <span>
+                      Categoria: <strong>{currentItem.selectedCategoria}</strong> → <strong>{currentItem.selectedSubtipo}</strong>
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {/* Formulário de Classificação */}
               <div className="space-y-4 mb-6">
+                {/* Header do formulário com botão limpar */}
+                <div className="flex items-center justify-between">
+                  <h4 className="font-medium text-gray-100">📝 Classificação</h4>
+                  
+                  {/* BOTÃO LIMPAR CLASSIFICAÇÃO */}
+                  <button
+                    onClick={clearCurrentClassification}
+                    className="px-3 py-1 bg-gray-600 hover:bg-gray-500 text-white rounded text-sm transition-colors flex items-center gap-2"
+                    title="Remove a classificação sugerida, deixando como não classificado"
+                  >
+                    🗑️ Limpar
+                  </button>
+                </div>
+
                 <div className="grid grid-cols-3 gap-3">
                   {/* Conta */}
                   <div>
-                    <label className="text-sm text-gray-400 block mb-1">Conta *</label>
+                    <label className="text-sm text-gray-400 block mb-1">Conta</label>
                     <select
                       value={currentItem.selectedConta || ''}
                       onChange={(e) => updateItem(currentIndex, 'selectedConta', e.target.value)}
@@ -287,7 +384,7 @@ export function BatchClassificationModal({
 
                   {/* Categoria */}
                   <div>
-                    <label className="text-sm text-gray-400 block mb-1">Categoria *</label>
+                    <label className="text-sm text-gray-400 block mb-1">Categoria</label>
                     <select
                       value={currentItem.selectedCategoria || ''}
                       onChange={(e) => updateItem(currentIndex, 'selectedCategoria', e.target.value)}
@@ -303,7 +400,7 @@ export function BatchClassificationModal({
 
                   {/* Subtipo */}
                   <div>
-                    <label className="text-sm text-gray-400 block mb-1">Subtipo *</label>
+                    <label className="text-sm text-gray-400 block mb-1">Subtipo</label>
                     <select
                       value={currentItem.selectedSubtipo || ''}
                       onChange={(e) => updateItem(currentIndex, 'selectedSubtipo', e.target.value)}
@@ -321,7 +418,7 @@ export function BatchClassificationModal({
 
                 {/* Descrição */}
                 <div>
-                  <label className="text-sm text-gray-400 block mb-1">Descrição *</label>
+                  <label className="text-sm text-gray-400 block mb-1">Descrição</label>
                   <input
                     type="text"
                     value={currentItem.selectedDescricao || ''}
@@ -381,21 +478,15 @@ export function BatchClassificationModal({
             <h4 className="font-medium text-gray-100 mb-2">📊 Resumo</h4>
             <div className="grid grid-cols-3 gap-4 text-sm">
               <div className="text-center">
-                <p className="text-green-400 text-lg font-bold">
-                  {batchItems.filter(item => item.selectedConta && item.selectedCategoria && item.selectedSubtipo).length}
-                </p>
-                <p className="text-gray-300">Completas</p>
+                <p className="text-green-400 text-lg font-bold">{classificationSummary.classified}</p>
+                <p className="text-gray-300">Classificadas</p>
               </div>
               <div className="text-center">
-                <p className="text-yellow-400 text-lg font-bold">
-                  {batchItems.filter(item => !item.selectedConta || !item.selectedCategoria || !item.selectedSubtipo).length}
-                </p>
-                <p className="text-gray-300">Pendentes</p>
+                <p className="text-yellow-400 text-lg font-bold">{classificationSummary.unclassified}</p>
+                <p className="text-gray-300">Não Classificadas</p>
               </div>
               <div className="text-center">
-                <p className="text-blue-400 text-lg font-bold">
-                  {batchItems.filter(item => item.suggestedClassification).length}
-                </p>
+                <p className="text-blue-400 text-lg font-bold">{classificationSummary.withSuggestion}</p>
                 <p className="text-gray-300">Com Sugestão</p>
               </div>
             </div>
@@ -423,10 +514,12 @@ export function BatchClassificationModal({
             </button>
             <button
               onClick={handleSubmit}
-              disabled={loading || batchItems.every(item => !item.selectedConta || !item.selectedCategoria || !item.selectedSubtipo)}
+              disabled={loading}
               className="flex-1 py-2 px-4 bg-green-600 hover:bg-green-500 disabled:bg-gray-600 disabled:text-gray-400 text-white rounded transition-colors font-medium"
             >
-              {loading ? '⏳ Aplicando...' : `✅ Aplicar ${batchItems.filter(item => item.selectedConta && item.selectedCategoria && item.selectedSubtipo).length} Classificações`}
+              {loading ? '⏳ Aplicando...' : 
+                `✅ Classificar ${classificationSummary.classified} • ⚪ ${classificationSummary.unclassified} Não Classificadas`
+              }
             </button>
           </div>
 
@@ -435,6 +528,7 @@ export function BatchClassificationModal({
             <div className="text-xs text-gray-400 space-y-1">
               <p>💡 Use as sugestões inteligentes quando disponíveis para acelerar o processo</p>
               <p>💡 "Aplicar a Todas" replica a classificação atual para todas as transações restantes</p>
+              <p>💡 🗑️ "Limpar" remove a classificação deixando como não classificado</p>
               <p>💡 As sugestões são baseadas no seu histórico de transações similares</p>
             </div>
           </div>

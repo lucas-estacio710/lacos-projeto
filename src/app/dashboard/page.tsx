@@ -18,7 +18,7 @@ import { AnalyticsTab } from '@/components/AnalyticsTab';
 import { ContasTab } from '@/components/ContasTab';
 import { CartoesTab } from '@/components/CartoesTab';
 import { EditTransactionModal } from '@/components/EditTransactionModal';
-import { EditCardTransactionModal } from '@/components/EditTransactionModal'; // Corrigido o import
+import { EditCardTransactionModal } from '@/components/EditTransactionModal';
 import { SplitTransactionModal } from '@/components/SplitTransactionModal';
 import { ReconciliationModal } from '@/components/ReconciliationModal';
 import { SimpleBillDiffModal, BillChanges } from '@/components/SimpleBillDiffModal';
@@ -38,10 +38,10 @@ export default function DashboardPage() {
     addCardTransactions,
     updateCardTransaction,
     updateMultipleCardTransactions,
-    deleteCardTransaction, // ← ADICIONAR ESTA LINHA
-    replaceFatura,
+    deleteCardTransaction,
+    applySimpleDiffChanges,        // ✅ NOVA FUNÇÃO
+    replaceFaturaComplete,         // ✅ NOVA FUNÇÃO
     markAsReconciled,
-    compareTransactions,
     getTransactionsForReconciliation
   } = useCardTransactions();
   
@@ -58,13 +58,13 @@ export default function DashboardPage() {
   const [showReconciliation, setShowReconciliation] = useState(false);
   const [reconciliationTransaction, setReconciliationTransaction] = useState<Transaction | null>(null);
   
-  // Estados para matching de faturas
-const [showCardMatching, setShowCardMatching] = useState(false);
-const [cardMatchingData, setCardMatchingData] = useState<{
-  faturaId: string;
-  oldBill: CardTransaction[];
-  newBill: CardTransaction[];
-} | null>(null);
+  // ===== ESTADOS PARA SIMPLEDIFF OBRIGATÓRIO =====
+  const [showSimpleDiff, setShowSimpleDiff] = useState(false);
+  const [simpleDiffData, setSimpleDiffData] = useState<{
+    faturaId: string;
+    existingBill: CardTransaction[];
+    newBill: CardTransaction[];
+  } | null>(null);
 
   // ===== FUNÇÕES AUXILIARES (MOVIDAS PARA CIMA) =====
   
@@ -158,69 +158,107 @@ const [cardMatchingData, setCardMatchingData] = useState<{
     }
   };
 
-const handleCardTransactionsImported = async (importedCards: CardTransaction[]): Promise<ImportResult> => {
-  try {
-    const result = await addCardTransactions(importedCards, true);
-    
-    // Se detectou duplicatas, mostrar modal de comparação
-    if (result.matches && result.matches.length > 0) {
-      // Extrair fatura antiga dos matches
-      const oldBill: CardTransaction[] = [];
+  // ✅ NOVO HANDLER: Sempre vai para SimpleDiff
+  const handleCardTransactionsImported = async (importedCards: CardTransaction[]): Promise<ImportResult> => {
+    try {
+      console.log('🔄 Processando importação de cartões (NOVO FLUXO)');
       
-      result.matches.forEach(match => {
-        if (match.transacaoExistente && !oldBill.find(t => t.id === match.transacaoExistente!.id)) {
-          oldBill.push(match.transacaoExistente);
-        }
-      });
+      const result = await addCardTransactions(importedCards);
       
-      setCardMatchingData({
-        faturaId: importedCards[0].fatura_id,
-        oldBill: oldBill,
-        newBill: importedCards // Usar a fatura completa nova
-      });
-      setShowCardMatching(true);
-    } else if (result.success) {
-      // Importação normal concluída
-      let message = `✅ Fatura Nubank importada!\n\n`;
-      message += `📊 ${importedCards.length} transações processadas\n`;
-      
-      if (result?.stats) {
-        message += `➕ ${result.stats.added} adicionadas\n`;
-        if (result.stats.duplicates > 0) {
-          message += `🔄 ${result.stats.duplicates} duplicatas ignoradas\n`;
-        }
+      if (result.requiresSimpleDiff) {
+        console.log('📊 Abrindo SimpleDiff...');
+        
+        // Configurar dados para SimpleDiff
+        setSimpleDiffData({
+          faturaId: result.faturaId,
+          existingBill: result.existingBill,
+          newBill: result.newBill
+        });
+        
+        // Abrir modal SimpleDiff
+        setShowSimpleDiff(true);
+        
+        console.log('✅ SimpleDiff configurado e aberto');
       }
       
-      message += `\n🆔 Fatura: ${importedCards[0].fatura_id}`;
+      return result;
       
-      alert(message);
-    }
-    
-    return result;
-  } catch (error) {
-    console.error('Erro ao importar cartões:', error);
-    throw error;
-  }
-};
-
-
-  const handleMergeCard = async (selectedIds: string[]) => {
-    if (!cardMatchingData) return;
-    
-    try {
-      // Implementar lógica de merge (manter selecionadas + adicionar novas)
-      alert(`✅ Fatura mesclada! ${selectedIds.length} transações mantidas.`);
-      setShowCardMatching(false);
-      setCardMatchingData(null);
     } catch (error) {
-      console.error('Erro ao mesclar fatura:', error);
-      alert('❌ Erro ao mesclar fatura');
+      console.error('❌ Erro ao importar cartões:', error);
+      throw error;
     }
   };
 
-  const handleCancelCard = () => {
-    setShowCardMatching(false);
-    setCardMatchingData(null);
+  // ✅ NOVO HANDLER: Aplicar mudanças do SimpleDiff
+  const handleSimpleDiffApply = async (changes: BillChanges) => {
+    if (!simpleDiffData) return;
+    
+    try {
+      console.log('🔄 Aplicando mudanças do SimpleDiff...');
+      
+      const result = await applySimpleDiffChanges({
+        toAdd: changes.toAdd,
+        toKeep: changes.toKeep,
+        toRemove: changes.toRemove
+      });
+      
+      if (result.success) {
+        const { added, kept, removed } = result.stats;
+        
+        alert(`✅ Fatura atualizada com sucesso!\n\n` +
+              `➕ ${added} transações adicionadas\n` +
+              `✅ ${kept} transações mantidas\n` +
+              `🗑️ ${removed} transações removidas\n\n` +
+              `📋 Fatura: ${simpleDiffData.faturaId}`);
+      } else {
+        throw new Error('Falha ao aplicar mudanças');
+      }
+      
+      // Fechar modal
+      setShowSimpleDiff(false);
+      setSimpleDiffData(null);
+      
+    } catch (error) {
+      console.error('❌ Erro ao aplicar SimpleDiff:', error);
+      alert('❌ Erro ao aplicar mudanças');
+    }
+  };
+
+  // ✅ NOVO HANDLER: Substituir tudo
+  const handleSimpleDiffReplaceAll = async () => {
+    if (!simpleDiffData) return;
+    
+    try {
+      console.log('🔄 Substituindo fatura completa...');
+      
+      const result = await replaceFaturaComplete(
+        simpleDiffData.faturaId,
+        simpleDiffData.newBill
+      );
+      
+      if (result.success) {
+        alert(`✅ Fatura substituída completamente!\n\n` +
+              `📋 ${simpleDiffData.newBill.length} transações importadas\n` +
+              `🔄 Fatura: ${simpleDiffData.faturaId}`);
+      } else {
+        throw new Error('Falha na substituição');
+      }
+      
+      // Fechar modal
+      setShowSimpleDiff(false);
+      setSimpleDiffData(null);
+      
+    } catch (error) {
+      console.error('❌ Erro na substituição:', error);
+      alert('❌ Erro ao substituir fatura');
+    }
+  };
+
+  // ✅ NOVO HANDLER: Cancelar SimpleDiff
+  const handleSimpleDiffCancel = () => {
+    console.log('❌ Importação cancelada pelo usuário');
+    setShowSimpleDiff(false);
+    setSimpleDiffData(null);
     alert('ℹ️ Importação cancelada');
   };
 
@@ -397,45 +435,6 @@ const handleCardTransactionsImported = async (importedCards: CardTransaction[]):
     }
   };
 
-const handleBillDiffApply = async (changes: BillChanges) => {
-  if (!cardMatchingData) return;
-  
-  try {
-    // 1. Remover transações marcadas para exclusão
-    if (changes.toRemove.length > 0) {
-      for (const id of changes.toRemove) {
-        // Usar função do hook
-        const existingCard = cardTransactions.find(t => t.id === id);
-        if (existingCard) {
-          await deleteCardTransaction(id);
-        }
-      }
-    }
-    
-    // 2. Adicionar novas transações
-    if (changes.toAdd.length > 0) {
-      await addCardTransactions(changes.toAdd, false);
-    }
-    
-    alert(`✅ Fatura atualizada!\n` +
-          `➕ ${changes.toAdd.length} adicionadas\n` +
-          `✅ ${changes.toKeep.length} mantidas\n` +
-          `🗑️ ${changes.toRemove.length} removidas`);
-    
-    setShowCardMatching(false);
-    setCardMatchingData(null);
-  } catch (error) {
-    console.error('Erro ao aplicar mudanças:', error);
-    alert('❌ Erro ao aplicar mudanças');
-  }
-};
-
-const handleBillDiffCancel = () => {
-  setShowCardMatching(false);
-  setCardMatchingData(null);
-  alert('ℹ️ Importação cancelada');
-};
-
   return (
     <div className="min-h-screen bg-gray-900">
       <div className="max-w-md mx-auto p-4">
@@ -530,7 +529,7 @@ const handleBillDiffCancel = () => {
                 onClick={() => setShowBankUpload(true)}
                 className="w-full p-2 bg-gray-700 text-gray-100 rounded-lg hover:bg-gray-600 transition-colors border border-gray-600"
               >
-                🔄 Importar Novo Arquivo
+                📄 Importar Novo Arquivo
               </button>
             </div>
 
@@ -602,19 +601,20 @@ const handleBillDiffCancel = () => {
           onConfirm={handleConfirmReconciliation}
         />
 
-        {/* Modal de matching de cartões */}
-        {showCardMatching && cardMatchingData && (
+        {/* ✅ NOVO MODAL: SimpleDiff OBRIGATÓRIO para todos os uploads de cartão */}
+        {showSimpleDiff && simpleDiffData && (
           <SimpleBillDiffModal
-            isOpen={showCardMatching}
-            faturaId={cardMatchingData.faturaId}
-            oldBill={cardMatchingData.oldBill}
-            newBill={cardMatchingData.newBill}
+            isOpen={showSimpleDiff}
+            faturaId={simpleDiffData.faturaId}
+            oldBill={simpleDiffData.existingBill}
+            newBill={simpleDiffData.newBill}
             onClose={() => {
-              setShowCardMatching(false);
-              setCardMatchingData(null);
+              setShowSimpleDiff(false);
+              setSimpleDiffData(null);
             }}
-            onApply={handleBillDiffApply}
-            onCancel={handleBillDiffCancel}
+            onApply={handleSimpleDiffApply}
+            onCancel={handleSimpleDiffCancel}
+            onReplaceAll={handleSimpleDiffReplaceAll} // ✅ NOVA PROP
           />
         )}
       </div>

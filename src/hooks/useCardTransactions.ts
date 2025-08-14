@@ -1,4 +1,4 @@
-// hooks/useCardTransactions.ts - ALGORITMO DE MATCHING CORRIGIDO
+// hooks/useCardTransactions.ts - ATUALIZADO PARA NOVO FLUXO COM SIMPLEDIFF OBRIGATÓRIO
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
@@ -34,7 +34,7 @@ export interface FaturaMatch {
   }[];
 }
 
-// Interface para resultado de importação
+// Interface para resultado de importação - SIMPLIFICADA
 export interface ImportResult {
   success: boolean;
   stats: {
@@ -43,7 +43,11 @@ export interface ImportResult {
     duplicates: number;
     matched?: number;
   };
-  matches?: FaturaMatch[];
+  // ✅ SEMPRE mostrar SimpleDiff agora
+  requiresSimpleDiff: boolean;
+  existingBill: CardTransaction[];
+  newBill: CardTransaction[];
+  faturaId: string;
 }
 
 export function useCardTransactions() {
@@ -103,328 +107,178 @@ export function useCardTransactions() {
     }
   };
 
-  // ===== ALGORITMO DE MATCHING CORRIGIDO =====
-  const compareTransactions = (
-    existing: CardTransaction[], 
-    incoming: CardTransaction[]
-  ): FaturaMatch[] => {
-    console.log('🔄 Iniciando comparação inteligente...');
-    console.log('📋 Existentes:', existing.length);
-    console.log('📦 Novas:', incoming.length);
-
-    const matches: FaturaMatch[] = [];
-    const processedExisting = new Set<string>();
-    const processedIncoming = new Set<string>();
-
-    // ETAPA 1: Matches por fingerprint (mais confiável)
-    console.log('🔍 ETAPA 1: Matching por fingerprint...');
-    
-    const existingByFingerprint = new Map<string, CardTransaction>();
-    existing.forEach(e => {
-      if (e.fingerprint) {
-        existingByFingerprint.set(e.fingerprint, e);
-      }
-    });
-
-    incoming.forEach(nova => {
-      if (nova.fingerprint && existingByFingerprint.has(nova.fingerprint)) {
-        const existente = existingByFingerprint.get(nova.fingerprint)!;
-        
-        matches.push({
-          tipo: 'PERFEITO',
-          transacaoExistente: existente,
-          transacaoNova: nova
-        });
-        
-        processedExisting.add(existente.id);
-        processedIncoming.add(nova.id);
-        
-        console.log(`✅ Match perfeito por fingerprint: ${nova.descricao_origem.substring(0, 30)}`);
-      }
-    });
-
-    // ETAPA 2: Matching individual para múltiplas transações iguais
-    console.log('🔍 ETAPA 2: Matching individual para transações similares...');
-    
-    const remainingExisting = existing.filter(e => !processedExisting.has(e.id));
-    const remainingIncoming = incoming.filter(i => !processedIncoming.has(i.id));
-
-    // Agrupar transações similares (mesmo valor + descrição similar)
-    const groupExisting = groupSimilarTransactions(remainingExisting);
-    const groupIncoming = groupSimilarTransactions(remainingIncoming);
-
-    // Comparar grupos e fazer matching 1:1 dentro de cada grupo
-    Object.keys(groupIncoming).forEach(groupKey => {
-      const incomingGroup = groupIncoming[groupKey];
-      const existingGroup = groupExisting[groupKey] || [];
-
-      console.log(`🔍 Comparando grupo "${groupKey}": ${existingGroup.length} existentes vs ${incomingGroup.length} novas`);
-
-      // Fazer matching 1:1 dentro do grupo
-      const maxMatches = Math.min(existingGroup.length, incomingGroup.length);
-      
-      for (let i = 0; i < maxMatches; i++) {
-        const existente = existingGroup[i];
-        const nova = incomingGroup[i];
-        
-        // Calcular similaridade
-        const similarity = calculateDetailedSimilarity(existente, nova);
-        
-        if (similarity.score >= 0.9) {
-          matches.push({
-            tipo: 'PERFEITO',
-            transacaoExistente: existente,
-            transacaoNova: nova
-          });
-          console.log(`✅ Match perfeito ${i+1}/${maxMatches}: ${nova.descricao_origem.substring(0, 30)}`);
-        } else if (similarity.score >= 0.7) {
-          matches.push({
-            tipo: 'QUASE_PERFEITO',
-            transacaoExistente: existente,
-            transacaoNova: nova,
-            diferenca: similarity.differences
-          });
-          console.log(`⚠️ Match suspeito ${i+1}/${maxMatches}: ${nova.descricao_origem.substring(0, 30)} (${Math.round(similarity.score * 100)}%)`);
-        } else {
-          // Não é um match válido, tratar como novo
-          matches.push({
-            tipo: 'NOVO',
-            transacaoNova: nova
-          });
-          console.log(`🆕 Nova transação: ${nova.descricao_origem.substring(0, 30)}`);
-        }
-        
-        processedExisting.add(existente.id);
-        processedIncoming.add(nova.id);
-      }
-
-      // Transações restantes do grupo incoming = novas
-      for (let i = maxMatches; i < incomingGroup.length; i++) {
-        const nova = incomingGroup[i];
-        matches.push({
-          tipo: 'NOVO',
-          transacaoNova: nova
-        });
-        processedIncoming.add(nova.id);
-        console.log(`🆕 Nova transação (grupo excedente): ${nova.descricao_origem.substring(0, 30)}`);
-      }
-
-      // Transações restantes do grupo existing = removidas
-      for (let i = maxMatches; i < existingGroup.length; i++) {
-        const existente = existingGroup[i];
-        matches.push({
-          tipo: 'REMOVIDO',
-          transacaoExistente: existente
-        });
-        processedExisting.add(existente.id);
-        console.log(`🗑️ Transação removida (grupo excedente): ${existente.descricao_origem.substring(0, 30)}`);
-      }
-    });
-
-    // ETAPA 3: Transações completamente novas (não estão em nenhum grupo existing)
-    const finalRemainingIncoming = incoming.filter(i => !processedIncoming.has(i.id));
-    finalRemainingIncoming.forEach(nova => {
-      matches.push({
-        tipo: 'NOVO',
-        transacaoNova: nova
-      });
-      console.log(`🆕 Transação completamente nova: ${nova.descricao_origem.substring(0, 30)}`);
-    });
-
-    // ETAPA 4: Transações que sumiram (estavam no existing mas não no incoming)
-    const finalRemainingExisting = existing.filter(e => !processedExisting.has(e.id));
-    finalRemainingExisting.forEach(existente => {
-      matches.push({
-        tipo: 'REMOVIDO',
-        transacaoExistente: existente
-      });
-      console.log(`🗑️ Transação que sumiu: ${existente.descricao_origem.substring(0, 30)}`);
-    });
-
-    console.log('✅ Comparação concluída:');
-    console.log(`  📊 ${matches.filter(m => m.tipo === 'PERFEITO').length} matches perfeitos`);
-    console.log(`  ⚠️ ${matches.filter(m => m.tipo === 'QUASE_PERFEITO').length} matches suspeitos`);
-    console.log(`  🆕 ${matches.filter(m => m.tipo === 'NOVO').length} transações novas`);
-    console.log(`  🗑️ ${matches.filter(m => m.tipo === 'REMOVIDO').length} transações removidas`);
-
-    return matches;
-  };
-
-  // ===== FUNÇÃO AUXILIAR: Agrupar transações similares =====
-  const groupSimilarTransactions = (transactions: CardTransaction[]): Record<string, CardTransaction[]> => {
-    const groups: Record<string, CardTransaction[]> = {};
-    
-    transactions.forEach(transaction => {
-      // Criar chave de agrupamento: valor + descrição normalizada
-      const valor = Math.round(Math.abs(transaction.valor) * 100); // Centavos para evitar problemas de float
-      const descricaoNormalizada = transaction.descricao_origem
-        .toLowerCase()
-        .replace(/[^a-záéíóúâêîôûàèìòùãõç0-9\s]/g, '') // Remove caracteres especiais
-        .replace(/\s+/g, ' ') // Normaliza espaços
-        .trim();
-      
-      const groupKey = `${valor}_${descricaoNormalizada}`;
-      
-      if (!groups[groupKey]) {
-        groups[groupKey] = [];
-      }
-      
-      groups[groupKey].push(transaction);
-    });
-    
-    // Ordenar cada grupo por data para matching consistente
-    Object.keys(groups).forEach(key => {
-      groups[key].sort((a, b) => a.data_transacao.localeCompare(b.data_transacao));
-    });
-    
-    return groups;
-  };
-
-  // ===== FUNÇÃO AUXILIAR: Calcular similaridade detalhada =====
-  const calculateDetailedSimilarity = (
-    existing: CardTransaction, 
-    incoming: CardTransaction
-  ): { score: number; differences: Array<{campo: string; valorAntigo: any; valorNovo: any}> } => {
-    let score = 0;
-    const differences: Array<{campo: string; valorAntigo: any; valorNovo: any}> = [];
-    
-    // Comparar data (peso: 3)
-    if (existing.data_transacao === incoming.data_transacao) {
-      score += 3;
-    } else {
-      differences.push({
-        campo: 'data',
-        valorAntigo: existing.data_transacao,
-        valorNovo: incoming.data_transacao
-      });
-    }
-    
-    // Comparar valor (peso: 4)
-    if (Math.abs(existing.valor - incoming.valor) < 0.01) {
-      score += 4;
-    } else {
-      differences.push({
-        campo: 'valor',
-        valorAntigo: existing.valor,
-        valorNovo: incoming.valor
-      });
-    }
-    
-    // Comparar descrição (peso: 3)
-    const descSimilarity = calculateStringSimilarity(
-      existing.descricao_origem.toLowerCase(),
-      incoming.descricao_origem.toLowerCase()
-    );
-    
-    if (descSimilarity >= 0.95) {
-      score += 3;
-    } else if (descSimilarity >= 0.8) {
-      score += 2;
-      differences.push({
-        campo: 'descricao',
-        valorAntigo: existing.descricao_origem,
-        valorNovo: incoming.descricao_origem
-      });
-    } else {
-      differences.push({
-        campo: 'descricao',
-        valorAntigo: existing.descricao_origem,
-        valorNovo: incoming.descricao_origem
-      });
-    }
-    
-    // Score máximo: 10
-    return {
-      score: score / 10,
-      differences
-    };
-  };
-
-  // ===== FUNÇÃO AUXILIAR: Similaridade de strings =====
-  const calculateStringSimilarity = (str1: string, str2: string): number => {
-    const longer = str1.length > str2.length ? str1 : str2;
-    const shorter = str1.length > str2.length ? str2 : str1;
-    
-    if (longer.length === 0) return 1.0;
-    
-    const editDistance = levenshteinDistance(longer, shorter);
-    return (longer.length - editDistance) / longer.length;
-  };
-
-  // ===== FUNÇÃO AUXILIAR: Distância de Levenshtein =====
-  const levenshteinDistance = (str1: string, str2: string): number => {
-    const matrix = [];
-    
-    for (let i = 0; i <= str2.length; i++) {
-      matrix[i] = [i];
-    }
-    
-    for (let j = 0; j <= str1.length; j++) {
-      matrix[0][j] = j;
-    }
-    
-    for (let i = 1; i <= str2.length; i++) {
-      for (let j = 1; j <= str1.length; j++) {
-        if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
-          matrix[i][j] = matrix[i - 1][j - 1];
-        } else {
-          matrix[i][j] = Math.min(
-            matrix[i - 1][j - 1] + 1,
-            matrix[i][j - 1] + 1,
-            matrix[i - 1][j] + 1
-          );
-        }
-      }
-    }
-    
-    return matrix[str2.length][str1.length];
-  };
-
-  // ===== RESTO DAS FUNÇÕES (mantidas igual) =====
-
-  // Adicionar múltiplas transações de cartão
+  // ===== FUNÇÃO PRINCIPAL: addCardTransactions - SEMPRE VAI PARA SIMPLEDIFF =====
   const addCardTransactions = async (
-    newTransactions: CardTransaction[], 
-    checkDuplicates: boolean = true
+    newTransactions: CardTransaction[]
   ): Promise<ImportResult> => {
     try {
-      console.log('🔄 Iniciando addCardTransactions com:', newTransactions.length, 'transações');
+      console.log('🔄 Iniciando addCardTransactions (NOVO FLUXO)');
+      console.log('📦 Transações recebidas:', newTransactions.length);
       
       if (newTransactions.length === 0) {
         return {
-          success: true,
-          stats: { total: 0, added: 0, duplicates: 0 }
+          success: false,
+          stats: { total: 0, added: 0, duplicates: 0 },
+          requiresSimpleDiff: false,
+          existingBill: [],
+          newBill: [],
+          faturaId: ''
         };
       }
       
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Usuário não autenticado');
 
-      // Verificar se é re-upload da mesma fatura
-      if (checkDuplicates) {
-        const faturaId = newTransactions[0].fatura_id;
-        const existingTransactions = await checkExistingFatura(faturaId);
+      const faturaId = newTransactions[0].fatura_id;
+      console.log('📋 Verificando fatura existente:', faturaId);
+      
+      // ✅ SEMPRE verificar se existe fatura, mesmo que vazia
+      const existingTransactions = await checkExistingFatura(faturaId);
+      
+      console.log('📊 Resultado da verificação:');
+      console.log('  📋 Existentes:', existingTransactions.length);
+      console.log('  📦 Novas:', newTransactions.length);
+      
+      // ✅ SEMPRE retornar para SimpleDiff (mesmo se não houver conflito)
+      return {
+        success: true,
+        stats: {
+          total: newTransactions.length,
+          added: 0, // Ainda não foi adicionado
+          duplicates: existingTransactions.length
+        },
+        requiresSimpleDiff: true, // ✅ SEMPRE TRUE
+        existingBill: existingTransactions,
+        newBill: newTransactions,
+        faturaId: faturaId
+      };
+      
+    } catch (err) {
+      console.error('❌ Erro ao processar addCardTransactions:', err);
+      return {
+        success: false,
+        stats: { total: newTransactions.length, added: 0, duplicates: 0 },
+        requiresSimpleDiff: false,
+        existingBill: [],
+        newBill: [],
+        faturaId: ''
+      };
+    }
+  };
+
+  // ===== NOVA FUNÇÃO: Aplicar mudanças do SimpleDiff =====
+  const applySimpleDiffChanges = async (changes: {
+    toAdd: CardTransaction[];
+    toKeep: string[];
+    toRemove: string[];
+  }): Promise<{ success: boolean; stats: { added: number; kept: number; removed: number } }> => {
+    try {
+      console.log('🔄 Aplicando mudanças do SimpleDiff...');
+      console.log('  ➕ Para adicionar:', changes.toAdd.length);
+      console.log('  ✅ Para manter:', changes.toKeep.length);
+      console.log('  🗑️ Para remover:', changes.toRemove.length);
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Usuário não autenticado');
+
+      let addedCount = 0;
+      let removedCount = 0;
+
+      // ===== ETAPA 1: Remover transações marcadas para remoção =====
+      if (changes.toRemove.length > 0) {
+        console.log('🗑️ Removendo transações...');
         
-        if (existingTransactions.length > 0) {
-          console.log('⚠️ Fatura já existe:', faturaId);
-          
-          // Usar algoritmo de matching corrigido
-          const matches = compareTransactions(existingTransactions, newTransactions);
-          
-          return {
-            success: true,
-            stats: {
-              total: newTransactions.length,
-              added: 0,
-              duplicates: existingTransactions.length,
-              matched: matches.filter(m => m.tipo === 'PERFEITO' || m.tipo === 'QUASE_PERFEITO').length
-            },
-            matches
-          };
+        const { error: deleteError } = await supabase
+          .from('card_transactions')
+          .delete()
+          .eq('user_id', user.id)
+          .in('id', changes.toRemove);
+
+        if (deleteError) {
+          console.error('❌ Erro ao remover:', deleteError);
+          throw deleteError;
         }
+
+        removedCount = changes.toRemove.length;
+        console.log(`✅ ${removedCount} transações removidas`);
       }
 
-      // Inserir normalmente se não há duplicatas
+      // ===== ETAPA 2: Adicionar novas transações =====
+      if (changes.toAdd.length > 0) {
+        console.log('➕ Adicionando novas transações...');
+        
+        const transactionsToInsert = changes.toAdd.map(transaction => ({
+          ...transaction,
+          user_id: user.id,
+          status: transaction.status || 'pending',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }));
+
+        const BATCH_SIZE = 50;
+        
+        for (let i = 0; i < transactionsToInsert.length; i += BATCH_SIZE) {
+          const batch = transactionsToInsert.slice(i, i + BATCH_SIZE);
+          
+          const { error: insertError } = await supabase
+            .from('card_transactions')
+            .insert(batch);
+
+          if (insertError) {
+            console.error('❌ Erro ao inserir batch:', insertError);
+            throw insertError;
+          }
+
+          addedCount += batch.length;
+        }
+
+        console.log(`✅ ${addedCount} transações adicionadas`);
+      }
+
+      // ===== ETAPA 3: Recarregar dados =====
+      await loadCardTransactions();
+      
+      console.log('✅ SimpleDiff aplicado com sucesso');
+      
+      return {
+        success: true,
+        stats: {
+          added: addedCount,
+          kept: changes.toKeep.length,
+          removed: removedCount
+        }
+      };
+      
+    } catch (err) {
+      console.error('❌ Erro ao aplicar SimpleDiff:', err);
+      return {
+        success: false,
+        stats: { added: 0, kept: 0, removed: 0 }
+      };
+    }
+  };
+
+  // ===== FUNÇÃO SIMPLIFICADA: Substituir fatura completa =====
+  const replaceFaturaComplete = async (
+    faturaId: string, 
+    newTransactions: CardTransaction[]
+  ): Promise<{ success: boolean; stats: { added: number; removed: number } }> => {
+    try {
+      console.log('🔄 Substituição completa da fatura:', faturaId);
+      
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Usuário não autenticado');
+
+      // Remover todas as transações da fatura
+      const { error: deleteError } = await supabase
+        .from('card_transactions')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('fatura_id', faturaId);
+
+      if (deleteError) throw deleteError;
+
+      // Adicionar todas as novas
       const transactionsToInsert = newTransactions.map(transaction => ({
         ...transaction,
         user_id: user.id,
@@ -433,39 +287,27 @@ export function useCardTransactions() {
         updated_at: new Date().toISOString()
       }));
 
-      const BATCH_SIZE = 50;
-      let insertedCount = 0;
-      
-      for (let i = 0; i < transactionsToInsert.length; i += BATCH_SIZE) {
-        const batch = transactionsToInsert.slice(i, i + BATCH_SIZE);
-        
-        const { error: insertError } = await supabase
-          .from('card_transactions')
-          .insert(batch);
+      const { error: insertError } = await supabase
+        .from('card_transactions')
+        .insert(transactionsToInsert);
 
-        if (insertError) {
-          throw insertError;
-        }
-
-        insertedCount += batch.length;
-      }
+      if (insertError) throw insertError;
 
       await loadCardTransactions();
       
       return {
         success: true,
         stats: {
-          total: newTransactions.length,
-          added: insertedCount,
-          duplicates: 0
+          added: newTransactions.length,
+          removed: 0 // Não sabemos quantas foram removidas
         }
       };
       
     } catch (err) {
-      console.error('❌ Erro ao adicionar transações de cartão:', err);
+      console.error('❌ Erro na substituição completa:', err);
       return {
         success: false,
-        stats: { total: newTransactions.length, added: 0, duplicates: 0 }
+        stats: { added: 0, removed: 0 }
       };
     }
   };
@@ -537,30 +379,6 @@ export function useCardTransactions() {
     }
   };
 
-  // Substituir fatura existente
-  const replaceFatura = async (
-    faturaId: string, 
-    newTransactions: CardTransaction[]
-  ): Promise<ImportResult> => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Usuário não autenticado');
-
-      const { error: deleteError } = await supabase
-        .from('card_transactions')
-        .delete()
-        .eq('user_id', user.id)
-        .eq('fatura_id', faturaId);
-
-      if (deleteError) throw deleteError;
-
-      return await addCardTransactions(newTransactions, false);
-    } catch (err) {
-      console.error('Erro ao substituir fatura:', err);
-      throw err;
-    }
-  };
-
   // Marcar transações como reconciliadas
   const markAsReconciled = async (transactionIds: string[]): Promise<number> => {
     try {
@@ -590,21 +408,7 @@ export function useCardTransactions() {
     }
   };
 
-  // Funções auxiliares
-  const getTransactionsByFatura = (faturaId: string): CardTransaction[] => {
-    return cardTransactions.filter(t => t.fatura_id === faturaId);
-  };
-
-  const getUnclassifiedTransactions = (): CardTransaction[] => {
-    return cardTransactions.filter(t => t.status === 'pending');
-  };
-
-  const getTransactionsForReconciliation = (faturaId?: string): CardTransaction[] => {
-    return cardTransactions.filter(t => 
-      t.status === 'classified' && 
-      (!faturaId || t.fatura_id === faturaId)
-    );
-  };
+  // Deletar transação individual
   const deleteCardTransaction = async (transactionId: string): Promise<void> => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -629,6 +433,22 @@ export function useCardTransactions() {
     }
   };
 
+  // Funções auxiliares
+  const getTransactionsByFatura = (faturaId: string): CardTransaction[] => {
+    return cardTransactions.filter(t => t.fatura_id === faturaId);
+  };
+
+  const getUnclassifiedTransactions = (): CardTransaction[] => {
+    return cardTransactions.filter(t => t.status === 'pending');
+  };
+
+  const getTransactionsForReconciliation = (faturaId?: string): CardTransaction[] => {
+    return cardTransactions.filter(t => 
+      t.status === 'classified' && 
+      (!faturaId || t.fatura_id === faturaId)
+    );
+  };
+
   // Carregar na inicialização
   useEffect(() => {
     loadCardTransactions();
@@ -641,28 +461,30 @@ export function useCardTransactions() {
     }
   }, [error]);
 
-    return {
-      // Estado
-      cardTransactions,
-      loading,
-      error,
-      
-      // Funções principais
-      addCardTransactions,
-      updateCardTransaction,
-      updateMultipleCardTransactions,
-      deleteCardTransaction, // ← ADICIONAR ESTA LINHA
-      replaceFatura,
-      markAsReconciled,
-      
-      // Funções auxiliares
-      checkExistingFatura,
-      compareTransactions,
-      getTransactionsByFatura,
-      getUnclassifiedTransactions,
-      getTransactionsForReconciliation,
-      
-      // Refresh
-      refreshCardTransactions: loadCardTransactions
-    };
+  return {
+    // Estado
+    cardTransactions,
+    loading,
+    error,
+    
+    // ===== FUNÇÕES PRINCIPAIS ATUALIZADAS =====
+    addCardTransactions,                    // ✅ Sempre vai para SimpleDiff
+    applySimpleDiffChanges,                // ✅ NOVA - Aplica mudanças do SimpleDiff
+    replaceFaturaComplete,                 // ✅ NOVA - Substituição completa
+    
+    // Funções existentes mantidas
+    updateCardTransaction,
+    updateMultipleCardTransactions,
+    deleteCardTransaction,
+    markAsReconciled,
+    
+    // Funções auxiliares
+    checkExistingFatura,
+    getTransactionsByFatura,
+    getUnclassifiedTransactions,
+    getTransactionsForReconciliation,
+    
+    // Refresh
+    refreshCardTransactions: loadCardTransactions
+  };
 }

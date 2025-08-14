@@ -1,11 +1,10 @@
-// components/BankUpload.tsx - VERSÃO CORRIGIDA COM UUID
+// components/BankUpload.tsx - VERSÃO SIMPLIFICADA - SEMPRE VAI PARA SIMPLEDIFF
 
 import React, { useState, useRef } from 'react';
 import { Upload } from 'lucide-react';
 import { Transaction, BankType } from '@/types';
 import { CardTransaction } from '@/hooks/useCardTransactions';
 import { formatMonth } from '@/lib/utils';
-import * as XLSX from 'xlsx';
 
 interface BankUploadProps {
   isOpen: boolean;
@@ -119,13 +118,83 @@ export function BankUpload({
     return '';
   };
 
+  // ✅ FUNÇÃO PRINCIPAL: Processar cartões (ACEITA TODOS OS VALORES)
+  const processCardTransactions = async (
+    lines: string[], 
+    cardType: 'Nubank' | 'VISA' | 'MasterCard',
+    faturaId: string
+  ): Promise<CardTransaction[]> => {
+    const cardTransactions: CardTransaction[] = [];
+    let processedLines = 0;
+    
+    console.log(`🔗 Processando fatura ${cardType}: ${faturaId}`);
+    
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      
+      processedLines++;
+      const cols = line.split(',');
+      
+      if (cols.length >= 3) {
+        const dataCompra = cols[0].trim();
+        const titulo = cols[1].trim();
+        const valorStr = cols[2].trim();
+        
+        if (!dataCompra || !titulo || titulo === 'title' || titulo === 'data' || titulo === 'date') continue;
+        
+        // ✅ ACEITAR QUALQUER VALOR (incluindo zero, positivo, negativo)
+        const valorOriginal = parseFloat(valorStr) || 0;
+        
+        // ✅ LÓGICA DE CONVERSÃO ATUALIZADA
+        let valorFinal: number;
+        if (valorOriginal > 0) {
+          // Valor positivo no CSV = Gasto = Negativo no sistema
+          valorFinal = -valorOriginal;
+        } else if (valorOriginal < 0) {
+          // Valor negativo no CSV = Estorno/Crédito = Positivo no sistema
+          valorFinal = Math.abs(valorOriginal);
+        } else {
+          // Valor zero = zero
+          valorFinal = 0;
+        }
+        
+        // Gerar fingerprint determinístico
+        const bankCode = cardType === 'Nubank' ? 'NUB' : cardType === 'VISA' ? 'VIS' : 'MST';
+        const fingerprint = generateUniqueID(bankCode, dataCompra, titulo, Math.abs(valorOriginal));
+        
+        // Criar transação de cartão
+        const cardTransaction: CardTransaction = {
+          id: generateUUID(),
+          fingerprint: fingerprint,
+          fatura_id: faturaId,
+          data_transacao: dataCompra,
+          descricao_origem: titulo,
+          valor: valorFinal,
+          categoria: null,
+          subtipo: null,
+          descricao_classificada: null,
+          status: 'pending',
+          origem: cardType,
+          cc: cardType
+        };
+        
+        cardTransactions.push(cardTransaction);
+      }
+    }
+    
+    console.log(`📊 ${cardType}: ${cardTransactions.length} transações processadas`);
+    return cardTransactions;
+  };
+
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
     
-    // Validação específica para Nubank
-    if (selectedBank === 'Nubank' && !referenceMes) {
-      alert('❌ Por favor, informe o mês de referência da fatura (formato AAMM, ex: 2412 para Dez/2024)');
+    // Validação específica para cartões de crédito
+    const isCardTransaction = ['Nubank', 'VISA', 'MasterCard'].includes(selectedBank);
+    if (isCardTransaction && !referenceMes) {
+      alert('⚠️ Por favor, informe o mês de referência da fatura (formato AAMM, ex: 2412 para Dez/2024)');
       return;
     }
     
@@ -138,102 +207,41 @@ export function BankUpload({
       console.log(`=== IMPORTAÇÃO ${selectedBank.toUpperCase()} ===`);
       console.log('Total de linhas no arquivo:', lines.length);
       
-      if (selectedBank === 'Nubank') {
-        // ===== PROCESSAR NUBANK (CARD_TRANSACTIONS) =====
+      if (isCardTransaction) {
+        // ===== PROCESSAR CARTÕES DE CRÉDITO =====
         if (!onCardTransactionsImported) {
-          alert('❌ Função de importação de cartões não configurada');
+          alert('⚠️ Função de importação de cartões não configurada');
           return;
         }
 
-        const cardTransactions: CardTransaction[] = [];
-        const faturaId = `NUBANK_${referenceMes}`;
-        let processedLines = 0;
+        const faturaId = `${selectedBank.toUpperCase()}_${referenceMes}`;
         
-        console.log('🔗 ID da Fatura:', faturaId);
-        
-        for (let i = 1; i < lines.length; i++) {
-          const line = lines[i].trim();
-          if (!line) continue;
-          
-          processedLines++;
-          const cols = line.split(',');
-          
-          if (cols.length >= 3) {
-            const dataCompra = cols[0].trim();
-            const titulo = cols[1].trim();
-            const valorStr = cols[2].trim();
-            
-            if (!dataCompra || !titulo || titulo === 'title') continue;
-            
-            const valor = parseFloat(valorStr) || 0;
-            if (valor <= 0) continue;
-            
-            // Gerar fingerprint determinístico para detecção de duplicatas
-            const fingerprint = generateUniqueID('NUB', dataCompra, titulo, valor);
-            
-            // Criar transação de cartão com UUID válido e fingerprint
-            const cardTransaction: CardTransaction = {
-              id: generateUUID(), // UUID válido para o Supabase
-              fingerprint: fingerprint, // ID determinístico para deduplicação
-              fatura_id: faturaId,
-              data_transacao: dataCompra, // Já vem no formato ISO do Nubank
-              descricao_origem: titulo,
-              valor: -valor, // Negativo pois é gasto
-              categoria: null,
-              subtipo: null,
-              descricao_classificada: null,
-              status: 'pending',
-              origem: 'Nubank',
-              cc: 'Nubank'
-            };
-            
-            cardTransactions.push(cardTransaction);
-            
-            console.log(`✅ Processada: ${titulo} | R$ ${valor}`);
-          }
-        }
-        
-        console.log('📊 Total de transações processadas:', cardTransactions.length);
+        const cardTransactions = await processCardTransactions(
+          lines, 
+          selectedBank as 'Nubank' | 'VISA' | 'MasterCard', 
+          faturaId
+        );
         
         if (cardTransactions.length === 0) {
-          alert('❌ Nenhuma transação válida encontrada no arquivo do Nubank');
+          alert(`⚠️ Nenhuma transação encontrada no arquivo do ${selectedBank}`);
           return;
         }
         
-        // Chamar callback para importar
+        console.log(`🎯 Enviando ${cardTransactions.length} transações para SimpleDiff`);
+        
+        // ✅ SEMPRE ENVIAR PARA O SIMPLEDIFF (não importa se existe duplicata)
         const result = await onCardTransactionsImported(cardTransactions);
         
-        // Se retornou matches, significa que detectou duplicata
-        if (result?.matches && result.matches.length > 0) {
-          console.log('⚠️ Fatura duplicada detectada, aguardando decisão do usuário...');
-          // O componente pai vai lidar com o modal de matching
-        } else if (result?.success) {
-          // Importação normal concluída
-          let message = `✅ Fatura Nubank importada!\n\n`;
-          message += `📊 ${cardTransactions.length} transações processadas\n`;
-          
-          if (result?.stats) {
-            message += `➕ ${result.stats.added} adicionadas\n`;
-            if (result.stats.duplicates > 0) {
-              message += `🔄 ${result.stats.duplicates} duplicatas ignoradas\n`;
-            }
-          }
-          
-          message += `\n🆔 Fatura: ${faturaId}`;
-          message += `\n📅 Mês: ${formatMonth(referenceMes)}`;
-          
-          alert(message);
-          onClose();
-        } else {
-          alert('❌ Erro ao importar fatura do Nubank');
-        }
+        // O SimpleDiff vai lidar com tudo agora
+        console.log('✅ Arquivo processado, aguardando decisão do usuário no SimpleDiff');
+        onClose();
         
       } else if (selectedBank === 'Inter') {
         // ===== PROCESSAR INTER =====
         const importedTransactions: Transaction[] = [];
         
         if (lines.length < 7) {
-          alert('❌ Arquivo deve ter pelo menos 7 linhas (5 para pular + cabeçalho + dados)');
+          alert('⚠️ Arquivo deve ter pelo menos 7 linhas (5 para pular + cabeçalho + dados)');
           return;
         }
         
@@ -273,7 +281,6 @@ export function BankUpload({
             }
             
             const valor = parseValorBR(valorStr);
-            if (isNaN(valor)) continue;
             
             const id = generateUniqueID('INT', data, descricao_origem, valor);
             const mes = generateMonth(data);
@@ -299,7 +306,7 @@ export function BankUpload({
         }
         
         if (importedTransactions.length === 0) {
-          alert(`❌ Nenhuma transação válida encontrada no arquivo do ${selectedBank}`);
+          alert(`⚠️ Nenhuma transação válida encontrada no arquivo do ${selectedBank}`);
           return;
         }
 
@@ -370,7 +377,6 @@ export function BankUpload({
             }
             
             const valor = parseBBValue(valorStr);
-            if (isNaN(valor)) continue;
             
             const id = generateUniqueID('BB', data, descricao_origem, valor);
             const mes = generateMonth(data);
@@ -396,7 +402,7 @@ export function BankUpload({
         }
         
         if (importedTransactions.length === 0) {
-          alert(`❌ Nenhuma transação válida encontrada no arquivo do ${selectedBank}`);
+          alert(`⚠️ Nenhuma transação válida encontrada no arquivo do ${selectedBank}`);
           return;
         }
 
@@ -421,16 +427,14 @@ export function BankUpload({
         onClose();
         
       } else if (selectedBank === 'TON') {
-        // Processar arquivo Excel da TON
         alert('Por favor, use arquivo Excel (.xlsx) para importar dados da TON');
       }
       
     } catch (error) {
       console.error(`Error importing ${selectedBank} file:`, error);
-      alert(`❌ Erro ao importar arquivo do ${selectedBank}: ` + (error as Error).message);
+      alert(`⚠️ Erro ao importar arquivo do ${selectedBank}: ` + (error as Error).message);
     } finally {
       setIsProcessing(false);
-      // Reset file input
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -438,6 +442,8 @@ export function BankUpload({
   };
 
   if (!isOpen) return null;
+
+  const isCardTransaction = ['Nubank', 'VISA', 'MasterCard'].includes(selectedBank);
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -466,12 +472,14 @@ export function BankUpload({
               >
                 <option value="Inter">🟠 Inter (Extrato)</option>
                 <option value="BB">🟡 Banco do Brasil (Extrato)</option>
-                <option value="Nubank">🟣 Nubank (Fatura Cartão)</option>
                 <option value="TON">🟢 Ton (Extrato)</option>
+                <option value="Nubank">🟣 Nubank (Fatura Cartão)</option>
+                <option value="VISA">🔵 VISA (Fatura Cartão)</option>
+                <option value="MasterCard">🔴 MasterCard (Fatura Cartão)</option>
               </select>
             </div>
 
-            {selectedBank === 'Nubank' && (
+            {isCardTransaction && (
               <div>
                 <label className="text-sm text-gray-400 block mb-2">Mês de Referência da Fatura *</label>
                 <input
@@ -487,54 +495,14 @@ export function BankUpload({
               </div>
             )}
 
-            {/* Informações específicas por banco */}
-            {selectedBank === 'Inter' && (
-              <div className="bg-orange-900 p-3 rounded-lg border border-orange-700">
-                <h4 className="font-medium text-orange-100 mb-2">📋 Formato Inter</h4>
-                <ul className="text-sm text-orange-200 space-y-1">
-                  <li>• Arquivo CSV do extrato</li>
-                  <li>• 5 primeiras linhas ignoradas</li>
-                  <li>• Colunas: Data, Descrição, Valor, Saldo</li>
-                  <li>• Separador: ; (ponto e vírgula)</li>
-                </ul>
-              </div>
-            )}
-
-            {selectedBank === 'BB' && (
-              <div className="bg-yellow-900 p-3 rounded-lg border border-yellow-700">
-                <h4 className="font-medium text-yellow-100 mb-2">📋 Formato Banco do Brasil</h4>
-                <ul className="text-sm text-yellow-200 space-y-1">
-                  <li>• Arquivo CSV do extrato</li>
-                  <li>• Colunas: Data, Lançamento, Detalhes, N° Doc, Valor</li>
-                  <li>• Separador: , (vírgula)</li>
-                  <li>• Conteúdo entre aspas</li>
-                </ul>
-              </div>
-            )}
-
-            {selectedBank === 'Nubank' && (
-              <div className="bg-purple-900 p-3 rounded-lg border border-purple-700">
-                <h4 className="font-medium text-purple-100 mb-2">📋 Formato Nubank</h4>
-                <ul className="text-sm text-purple-200 space-y-1">
-                  <li>• CSV da fatura em aberto</li>
-                  <li>• Colunas: date, title, amount</li>
-                  <li>• ✅ Detecção de faturas duplicadas</li>
-                  <li>• ✅ Sistema de matching inteligente</li>
-                </ul>
-              </div>
-            )}
-            
-            {selectedBank === 'TON' && (
-              <div className="bg-green-900 p-3 rounded-lg border border-green-700">
-                <h4 className="font-medium text-green-100 mb-2">📋 Formato TON</h4>
-                <ul className="text-sm text-green-200 space-y-1">
-                  <li>• Arquivo Excel (.xlsx)</li>
-                  <li>• Colunas: Data, Valor, Tipo, Status, ID, Descrição</li>
-                  <li>• Data: DD-MM-YYYY</li>
-                  <li>• Valor: R$ formato brasileiro</li>
-                </ul>
-              </div>
-            )}
+            {/* Informação importante sobre o novo fluxo */}
+            <div className="bg-blue-900/30 border border-blue-700 rounded-lg p-3">
+              <p className="text-blue-100 text-sm font-medium mb-1">🔄 Novo Fluxo de Importação</p>
+              <p className="text-blue-200 text-xs">
+                Todas as importações passarão por uma tela de revisão onde você pode 
+                selecionar exatamente quais transações deseja salvar na base de dados.
+              </p>
+            </div>
             
             <button
               onClick={() => fileInputRef.current?.click()}
@@ -558,7 +526,7 @@ export function BankUpload({
                       Selecionar Arquivo {selectedBank === 'TON' ? 'Excel' : 'CSV'}
                     </p>
                     <p className="text-blue-300 text-sm mt-1">
-                      {selectedBank === 'Nubank' ? 'Fatura do Nubank' : `Extrato do ${selectedBank}`}
+                      {isCardTransaction ? `Fatura do ${selectedBank}` : `Extrato do ${selectedBank}`}
                     </p>
                   </>
                 )}

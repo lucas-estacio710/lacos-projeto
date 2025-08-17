@@ -1,4 +1,4 @@
-// components/EnhancedUnclassifiedSection.tsx - VERSÃO ATUALIZADA PARA NOVA ESTRUTURA
+// components/EnhancedUnclassifiedSection.tsx - CORRIGIDO
 
 import React, { useState } from 'react';
 import { Transaction } from '@/types';
@@ -28,6 +28,7 @@ interface EnhancedUnclassifiedSectionProps {
     subtipo: string;
     descricao: string;
   }>) => Promise<void>;
+  onMoveToComplexClassification?: (transactionId: string) => Promise<void>;
   canReconcile?: boolean;
   type: 'transactions' | 'cards';
   title?: string;
@@ -43,6 +44,7 @@ export function EnhancedUnclassifiedSection({
   onReconcileTransaction,
   onApplyQuickClassification,
   onApplyBatchClassification,
+  onMoveToComplexClassification,
   canReconcile = false,
   type,
   title
@@ -116,6 +118,19 @@ export function EnhancedUnclassifiedSection({
     if (!onApplyBatchClassification) return;
     await onApplyBatchClassification(classifications);
     setShowBatchModal(false);
+  };
+
+  // Mover para classificação complexa
+  const handleMoveToComplexClassification = async (item: Transaction | CardTransaction) => {
+    if (!onMoveToComplexClassification) return;
+
+    try {
+      await onMoveToComplexClassification(item.id);
+      alert('✅ Transação movida para Classificação Complexa!');
+    } catch (error) {
+      console.error('❌ Erro ao mover para classificação complexa:', error);
+      alert('❌ Erro ao mover transação');
+    }
   };
 
   const sectionConfig = {
@@ -212,10 +227,10 @@ export function EnhancedUnclassifiedSection({
                         </div>
                         
                         <div className="text-xs text-gray-300">
-                          {formatDate(isTransaction ? transaction.data : cardTransaction.data_transacao)} • 
-                          {item.origem || 'N/A'} • 
+                          {formatDate(isTransaction ? transaction.data : cardTransaction.data_transacao)} •
+                          {item.origem || 'N/A'} •
                           {item.cc || 'N/A'}
-                          {isTransaction && transaction.is_from_reconciliation && (
+                          {isTransaction && (transaction as any).is_from_reconciliation && (
                             <span className="text-blue-300 ml-1">
                               🔗 Reconciliada
                             </span>
@@ -232,6 +247,17 @@ export function EnhancedUnclassifiedSection({
                       
                       {/* COLUNA 3: Botões de Ação */}
                       <div className="flex items-center gap-1 flex-shrink-0">
+                        
+                        {/* Botão de Classificação Complexa */}
+                        {onMoveToComplexClassification && (
+                          <button
+                            onClick={() => handleMoveToComplexClassification(item as Transaction | CardTransaction)}
+                            className="w-7 h-7 bg-orange-600 hover:bg-orange-500 text-white rounded text-xs transition-colors flex items-center justify-center shadow-sm"
+                            title="Mover para Classificação Complexa"
+                          >
+                            🧩
+                          </button>
+                        )}
                         
                         {/* Botão de Sugestões IA */}
                         <button
@@ -254,7 +280,7 @@ export function EnhancedUnclassifiedSection({
                         </button>
                         
                         {/* Botão de Reconciliação (apenas para transactions) */}
-                        {onReconcileTransaction && isTransaction && canReconcile && !transaction.is_from_reconciliation && (
+                        {onReconcileTransaction && isTransaction && canReconcile && !(transaction as any).is_from_reconciliation && (
                           <button
                             onClick={() => onReconcileTransaction(transaction)}
                             className="w-7 h-7 bg-green-600 hover:bg-green-500 text-white rounded text-xs transition-colors flex items-center justify-center shadow-sm"
@@ -321,7 +347,7 @@ export function EnhancedUnclassifiedSection({
                                     conta: suggestion.conta,
                                     categoria: suggestion.categoria,
                                     subtipo: suggestion.subtipo,
-                                    descricao: item.descricao_origem || 'Sem descrição',
+                                    descricao: suggestion.descricao,
                                     realizado: isTransaction ? 's' : undefined
                                   };
                                   onApplyQuickClassification(item.id, classification);
@@ -396,6 +422,12 @@ export function EnhancedUnclassifiedSection({
           historicTransactions={historicTransactions}
           historicCardTransactions={historicCardTransactions}
           onApplyBatch={handleBatchClassification}
+          onMoveToComplexClassification={onMoveToComplexClassification ? async (transactionIds: string[]) => {
+            // Executar para cada transação individualmente
+            for (const id of transactionIds) {
+              await onMoveToComplexClassification(id);
+            }
+          } : undefined}
         />
       )}
     </>

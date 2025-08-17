@@ -1,4 +1,4 @@
-// hooks/useCardTransactions.ts - ATUALIZADO PARA NOVO FLUXO COM SIMPLEDIFF OBRIGATÓRIO
+// hooks/useCardTransactions.ts - ATUALIZADO COM FUNÇÃO SPLIT PARA CARTÕES
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
@@ -112,7 +112,7 @@ export function useCardTransactions() {
     newTransactions: CardTransaction[]
   ): Promise<ImportResult> => {
     try {
-      console.log('🔄 Iniciando addCardTransactions (NOVO FLUXO)');
+      console.log('📄 Iniciando addCardTransactions (NOVO FLUXO)');
       console.log('📦 Transações recebidas:', newTransactions.length);
       
       if (newTransactions.length === 0) {
@@ -173,7 +173,7 @@ export function useCardTransactions() {
     toRemove: string[];
   }): Promise<{ success: boolean; stats: { added: number; kept: number; removed: number } }> => {
     try {
-      console.log('🔄 Aplicando mudanças do SimpleDiff...');
+      console.log('📄 Aplicando mudanças do SimpleDiff...');
       console.log('  ➕ Para adicionar:', changes.toAdd.length);
       console.log('  ✅ Para manter:', changes.toKeep.length);
       console.log('  🗑️ Para remover:', changes.toRemove.length);
@@ -264,7 +264,7 @@ export function useCardTransactions() {
     newTransactions: CardTransaction[]
   ): Promise<{ success: boolean; stats: { added: number; removed: number } }> => {
     try {
-      console.log('🔄 Substituição completa da fatura:', faturaId);
+      console.log('📄 Substituição completa da fatura:', faturaId);
       
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Usuário não autenticado');
@@ -379,6 +379,105 @@ export function useCardTransactions() {
     }
   };
 
+  // ===== NOVA FUNÇÃO: Dividir transação de cartão =====
+  const splitCardTransaction = async (
+    originalTransaction: CardTransaction, 
+    parts: Array<{
+      categoria: string;
+      subtipo: string;
+      descricao_classificada: string;
+      valor: number;
+    }>
+  ): Promise<{ success: boolean; partsCreated: number }> => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error('Usuário não autenticado');
+      }
+
+      console.log('📄 Iniciando divisão da transação de cartão:', originalTransaction.id);
+
+      // ETAPA 1: Deletar transação original
+      const { error: deleteError } = await supabase
+        .from('card_transactions')
+        .delete()
+        .eq('id', originalTransaction.id)
+        .eq('user_id', user.id);
+
+      if (deleteError) {
+        throw deleteError;
+      }
+
+      console.log('✅ Transação original deletada');
+
+      // ETAPA 2: Criar novas transações divididas
+      const newCardTransactions = parts.map((part, index) => ({
+        id: `${originalTransaction.id}-${index + 1}`,
+        user_id: user.id,
+        fingerprint: `${originalTransaction.fingerprint || originalTransaction.id}-${index + 1}`,
+        fatura_id: originalTransaction.fatura_id,
+        data_transacao: originalTransaction.data_transacao,
+        descricao_origem: originalTransaction.descricao_origem,
+        valor: part.valor,
+        categoria: part.categoria,
+        subtipo: part.subtipo,
+        descricao_classificada: part.descricao_classificada,
+        status: 'classified' as const,
+        origem: originalTransaction.origem,
+        cc: originalTransaction.cc,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }));
+
+      const { data: insertedTransactions, error: insertError } = await supabase
+        .from('card_transactions')
+        .insert(newCardTransactions)
+        .select();
+
+      if (insertError) {
+        throw insertError;
+      }
+
+      console.log('✅ Novas transações de cartão criadas:', insertedTransactions?.length);
+
+      // ETAPA 3: Atualizar estado local
+      setCardTransactions(prev => {
+        const withoutOriginal = prev.filter(t => t.id !== originalTransaction.id);
+        
+        const newTransactionObjects: CardTransaction[] = newCardTransactions.map(nt => ({
+          id: nt.id,
+          fingerprint: nt.fingerprint,
+          fatura_id: nt.fatura_id,
+          data_transacao: nt.data_transacao,
+          descricao_origem: nt.descricao_origem,
+          valor: nt.valor,
+          categoria: nt.categoria,
+          subtipo: nt.subtipo,
+          descricao_classificada: nt.descricao_classificada,
+          status: nt.status,
+          origem: nt.origem,
+          cc: nt.cc,
+          created_at: nt.created_at,
+          updated_at: nt.updated_at
+        }));
+        
+        return [...withoutOriginal, ...newTransactionObjects];
+      });
+
+      console.log('✅ Divisão da transação de cartão concluída com sucesso');
+      
+      return {
+        success: true,
+        partsCreated: parts.length
+      };
+
+    } catch (err) {
+      console.error('❌ Erro ao dividir transação de cartão:', err);
+      setError(err instanceof Error ? err.message : 'Erro ao dividir transação de cartão');
+      throw err;
+    }
+  };
+
   // Marcar transações como reconciliadas
   const markAsReconciled = async (transactionIds: string[]): Promise<number> => {
     try {
@@ -471,6 +570,7 @@ export function useCardTransactions() {
     addCardTransactions,                    // ✅ Sempre vai para SimpleDiff
     applySimpleDiffChanges,                // ✅ NOVA - Aplica mudanças do SimpleDiff
     replaceFaturaComplete,                 // ✅ NOVA - Substituição completa
+    splitCardTransaction,                  // ✅ NOVA - Dividir transação de cartão
     
     // Funções existentes mantidas
     updateCardTransaction,

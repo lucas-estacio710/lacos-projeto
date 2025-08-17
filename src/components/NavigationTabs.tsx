@@ -1,4 +1,5 @@
-// components/NavigationTabs.tsx
+// components/NavigationTabs.tsx - ATUALIZADO COM ABA CLASSIFICAÇÃO COMPLEXA
+
 import React from 'react';
 
 interface NavigationTabsProps {
@@ -7,6 +8,7 @@ interface NavigationTabsProps {
   unclassifiedCount: number;
   unclassifiedCardsCount: number;
   hasReconciliationPending: boolean;
+  complexCount: number; // ✅ NOVA PROP
 }
 
 export function NavigationTabs({ 
@@ -14,7 +16,8 @@ export function NavigationTabs({
   setActiveTab, 
   unclassifiedCount, 
   unclassifiedCardsCount,
-  hasReconciliationPending 
+  hasReconciliationPending,
+  complexCount // ✅ NOVA PROP
 }: NavigationTabsProps) {
   const totalPending = unclassifiedCount + unclassifiedCardsCount;
   
@@ -25,6 +28,13 @@ export function NavigationTabs({
       badge: totalPending,
       badgeColor: totalPending > 10 ? 'bg-red-500' : totalPending > 0 ? 'bg-yellow-500' : null,
       highlight: totalPending > 0
+    },
+    {
+      id: 'complex', // ✅ NOVA ABA
+      label: '🧩 Classificação Complexa',
+      badge: complexCount,
+      badgeColor: complexCount > 0 ? 'bg-orange-500' : null,
+      highlight: false
     },
     {
       id: 'overview',
@@ -61,12 +71,16 @@ export function NavigationTabs({
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={`
-              relative flex-1 min-w-[80px] py-2 px-2 rounded-lg font-medium transition-all
+              relative flex-1 min-w-[70px] py-2 px-2 rounded-lg font-medium transition-all
               ${activeTab === tab.id 
                 ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white shadow-lg text-xs sm:text-sm' 
                 : tab.highlight
                   ? 'text-yellow-300 hover:bg-gray-700 animate-pulse text-xs sm:text-sm'
                   : 'text-gray-300 hover:bg-gray-700 text-xs sm:text-sm'
+              }
+              ${tab.id === 'complex' && activeTab === tab.id 
+                ? 'bg-gradient-to-r from-orange-600 to-red-600' 
+                : ''
               }
             `}
           >
@@ -78,6 +92,7 @@ export function NavigationTabs({
                   absolute -top-3 -right-3 px-1.5 py-0.5 rounded-full text-xs font-bold
                   ${tab.badgeColor || 'bg-gray-600'} text-white min-w-[20px] text-center
                   ${tab.highlight ? 'animate-bounce' : ''}
+                  ${tab.id === 'complex' && typeof tab.badge === 'number' && tab.badge > 0 ? 'animate-pulse' : ''}
                 `}>
                   {tab.badge}
                 </span>

@@ -64,12 +64,12 @@ export function CartoesTab({
   // Agrupar por categoria (apenas as classificadas)
   const transacoesClassificadas = filteredTransactions.filter(t => t.status === 'classified');
 
-  // Calcular totais
-  const totalGeral = filteredTransactions.reduce((sum, t) => sum + Math.abs(t.valor), 0);
-  const totalClassificado = transacoesClassificadas.reduce((sum, t) => sum + Math.abs(t.valor), 0);
-  const totalNaoClassificado = filteredTransactions
+  // ✅ CÁLCULOS CORRIGIDOS: Somar com sinais e depois aplicar Math.abs
+  const totalGeral = Math.abs(filteredTransactions.reduce((sum, t) => sum + t.valor, 0));
+  const totalClassificado = Math.abs(transacoesClassificadas.reduce((sum, t) => sum + t.valor, 0));
+  const totalNaoClassificado = Math.abs(filteredTransactions
     .filter(t => t.status !== 'classified')
-    .reduce((sum, t) => sum + Math.abs(t.valor), 0);
+    .reduce((sum, t) => sum + t.valor, 0));
 
   return (
     <div className="space-y-4">
@@ -157,7 +157,9 @@ export function CartoesTab({
 
         if (transacoesConta.length === 0) return null;
 
-        const totalConta = transacoesConta.reduce((sum, t) => sum + Math.abs(t.valor), 0);
+        // ✅ CORREÇÃO: Calcular total da conta respeitando sinais
+        const totalConta = Math.abs(transacoesConta.reduce((sum, t) => sum + t.valor, 0));
+        
         const contaLabels: Record<string, { title: string; icon: string; color: string }> = {
           'PJ': { title: 'Gastos PJ', icon: '🏢', color: 'blue' },
           'PF': { title: 'Gastos PF', icon: '👤', color: 'green' },
@@ -209,13 +211,15 @@ export function CartoesTab({
             {/* Categorias da Conta */}
             {Object.entries(groupedHierarchyConta)
               .sort(([,a], [,b]) => {
-                const totalA = Object.values(a).flat().reduce((sum, t) => sum + Math.abs(t.valor), 0);
-                const totalB = Object.values(b).flat().reduce((sum, t) => sum + Math.abs(t.valor), 0);
+                // ✅ CORREÇÃO: Ordenar por valor total respeitando sinais
+                const totalA = Math.abs(Object.values(a).flat().reduce((sum, t) => sum + t.valor, 0));
+                const totalB = Math.abs(Object.values(b).flat().reduce((sum, t) => sum + t.valor, 0));
                 return totalB - totalA;
               })
               .map(([categoria, subtipos]) => {
                 const categoriaTransactions = Object.values(subtipos).flat();
-                const totalCategoria = categoriaTransactions.reduce((sum, t) => sum + Math.abs(t.valor), 0);
+                // ✅ CORREÇÃO: Calcular total da categoria respeitando sinais
+                const totalCategoria = Math.abs(categoriaTransactions.reduce((sum, t) => sum + t.valor, 0));
                 const countCategoria = categoriaTransactions.length;
                 
                 // Buscar ícone da categoria
@@ -262,12 +266,14 @@ export function CartoesTab({
                       <div className="border-t border-gray-700 bg-gradient-to-r from-gray-800 to-gray-750">
                         {Object.entries(subtipos)
                           .sort(([,a], [,b]) => {
-                            const totalA = a.reduce((sum, t) => sum + Math.abs(t.valor), 0);
-                            const totalB = b.reduce((sum, t) => sum + Math.abs(t.valor), 0);
+                            // ✅ CORREÇÃO: Ordenar subtipos por valor respeitando sinais
+                            const totalA = Math.abs(a.reduce((sum, t) => sum + t.valor, 0));
+                            const totalB = Math.abs(b.reduce((sum, t) => sum + t.valor, 0));
                             return totalB - totalA;
                           })
                           .map(([subtipo, transactions]) => {
-                            const totalSubtipo = transactions.reduce((sum, t) => sum + Math.abs(t.valor), 0);
+                            // ✅ CORREÇÃO: Calcular total do subtipo respeitando sinais
+                            const totalSubtipo = Math.abs(transactions.reduce((sum, t) => sum + t.valor, 0));
                             const countSubtipo = transactions.length;
                             const subtypeKey = `${conta}-${categoria}-${subtipo}`;
                             const isSubtypeExpanded = expandedSubtypes[subtypeKey];
@@ -328,8 +334,10 @@ export function CartoesTab({
                                           </div>
                                           
                                           <div className="text-right flex-shrink-0 ml-2">
-                                            <span className="font-medium text-sm text-red-400">
-                                              R$ {formatCurrency(Math.abs(transaction.valor))}
+                                            <span className={`font-medium text-sm ${
+                                              transaction.valor >= 0 ? 'text-green-400' : 'text-red-400'
+                                            }`}>
+                                              {transaction.valor >= 0 ? '+' : ''}R$ {formatCurrency(Math.abs(transaction.valor))}
                                             </span>
                                             {transaction.status !== 'reconciled' && (
                                               <button

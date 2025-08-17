@@ -1,4 +1,4 @@
-// components/SimpleBillDiffModal.tsx - REBUILD COMPLETO COM SELEÇÃO MANUAL
+// components/SimpleBillDiffModal.tsx - REBUILD COMPLETO COM CÁLCULOS CORRIGIDOS
 
 import React, { useState, useEffect } from 'react';
 import { CardTransaction } from '@/hooks/useCardTransactions';
@@ -71,7 +71,7 @@ export function SimpleBillDiffModal({
   useEffect(() => {
     if (!isOpen) return;
 
-    console.log('🔄 Processando diff da fatura:', faturaId);
+    console.log('📄 Processando diff da fatura:', faturaId);
     console.log('📋 Existentes:', oldBill.length);
     console.log('📦 Novas:', newBill.length);
 
@@ -158,7 +158,7 @@ export function SimpleBillDiffModal({
     }
   };
 
-  // ===== CALCULAR RESULTADO FINAL =====
+  // ===== CALCULAR RESULTADO FINAL CORRIGIDO =====
   const calculateResult = (): BillChanges & { summary: any } => {
     // Type assertions to help TypeScript understand the types
     const selectedLeft: DiffItem[] = leftItems.filter((item: DiffItem) => item.selected);
@@ -169,10 +169,12 @@ export function SimpleBillDiffModal({
     const toRemove: string[] = leftItems.filter((item: DiffItem) => !item.selected).map((item: DiffItem) => item.transaction.id);
     
     const finalCount = toKeep.length + toAdd.length;
-    const finalValue = [
+    
+    // ✅ CORREÇÃO: Calcular valor final respeitando sinais (gastos negativos + estornos positivos)
+    const finalValue = Math.abs([
       ...selectedLeft.map((item: DiffItem) => item.transaction),
       ...toAdd
-    ].reduce((sum, t) => sum + t.valor, 0);
+    ].reduce((sum, t) => sum + t.valor, 0)); // Somar com sinais e depois Math.abs
     
     return {
       toAdd,
@@ -191,7 +193,7 @@ export function SimpleBillDiffModal({
   // ===== HANDLER PARA SUBSTITUIR TUDO =====
   const handleReplaceAll = () => {
     const confirmReplace = window.confirm(
-      `🔄 Substituir toda a fatura?\n\n` +
+      `📄 Substituir toda a fatura?\n\n` +
       `Isso irá:\n` +
       `• Remover TODAS as ${oldBill.length} transações existentes\n` +
       `• Adicionar TODAS as ${newBill.length} transações novas\n` +
@@ -200,7 +202,7 @@ export function SimpleBillDiffModal({
     );
 
     if (confirmReplace && onReplaceAll) {
-      console.log('🔄 Usuário confirmou substituição completa');
+      console.log('📄 Usuário confirmou substituição completa');
       onReplaceAll();
       onClose();
     }
@@ -374,7 +376,7 @@ export function SimpleBillDiffModal({
         <div className="p-4 border-b border-gray-700">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-xl font-semibold text-gray-100">
-              🔄 Revisão da Fatura: {faturaId}
+              📄 Revisão da Fatura: {faturaId}
             </h3>
             <button onClick={onClose} className="text-gray-400 hover:text-gray-200 text-2xl">
               ×
@@ -383,7 +385,7 @@ export function SimpleBillDiffModal({
 
           <div className="bg-blue-900/30 border border-blue-700 rounded-lg p-3">
             <p className="text-blue-100 text-sm">
-              📝 <strong>Instruções:</strong> Selecione exatamente quais transações deseja manter/adicionar na base de dados. 
+              🔍 <strong>Instruções:</strong> Selecione exatamente quais transações deseja manter/adicionar na base de dados. 
               Transações similares são automaticamente detectadas e destacadas.
             </p>
           </div>
@@ -470,7 +472,8 @@ export function SimpleBillDiffModal({
           <div className="bg-gray-700 rounded-lg p-3 mb-4">
             <h5 className="font-medium text-gray-100 mb-3">📊 Resultado da Seleção:</h5>
             
-            <div className="grid grid-cols-4 gap-4 text-sm">
+            {/* Primeira linha: Operações */}
+            <div className="grid grid-cols-4 gap-4 text-sm mb-3">
               <div className="text-center">
                 <p className="text-green-400 font-medium text-lg">{result.summary.willKeep}</p>
                 <p className="text-gray-300 text-xs">Manter Existentes</p>
@@ -494,8 +497,12 @@ export function SimpleBillDiffModal({
                 <div>
                   <p className="text-gray-300 text-sm">Valor total da fatura resultante:</p>
                   <p className="font-bold text-lg text-blue-400">
-                    R$ {formatCurrency(Math.abs(result.summary.finalValue))}
+                    R$ {formatCurrency(result.summary.finalValue)}
                   </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-gray-400 text-xs">✅ Cálculo corrigido:</p>
+                  <p className="text-gray-400 text-xs">Gastos - Estornos = Líquido</p>
                 </div>
               </div>
             </div>
@@ -516,14 +523,14 @@ export function SimpleBillDiffModal({
               className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors"
               title="Substitui toda a fatura existente pela nova"
             >
-              🔄 Substituir Tudo
+              📄 Substituir Tudo
             </button>
             
             <button
               onClick={handleApply}
               className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded transition-colors font-medium"
             >
-              ✅ Salvar Seleção ({result.summary.finalCount} transações | R$ {formatCurrency(Math.abs(result.summary.finalValue))})
+              ✅ Salvar Seleção ({result.summary.finalCount} transações | R$ {formatCurrency(result.summary.finalValue)})
             </button>
           </div>
         </div>

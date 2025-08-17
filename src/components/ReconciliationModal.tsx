@@ -1,4 +1,4 @@
-// components/ReconciliationModal.tsx - VERSÃO SIMPLIFICADA PARA CARD_TRANSACTIONS
+// components/ReconciliationModal.tsx - VERSÃO CORRIGIDA COM CÁLCULO DE VALORES
 
 import React, { useState, useEffect } from 'react';
 import { Transaction } from '@/types';
@@ -99,10 +99,12 @@ export function ReconciliationModal({
   if (!isOpen || !transaction) return null;
 
   const selectedFatura = availableFaturas.find(f => f.faturaId === selectedFaturaId);
+  
+  // ✅ CORREÇÃO: Calcular total respeitando sinais (gastos negativos + estornos positivos)
   const selectedTotal = selectedFatura 
-    ? selectedFatura.transactions
+    ? Math.abs(selectedFatura.transactions
         .filter(t => selectedCards.has(t.id))
-        .reduce((sum, t) => sum + Math.abs(t.valor), 0)
+        .reduce((sum, t) => sum + t.valor, 0)) // Somar com sinais e depois Math.abs
     : 0;
 
   const valueDifference = Math.abs(transaction.valor) - selectedTotal;
@@ -262,6 +264,27 @@ export function ReconciliationModal({
                 </div>
               </div>
 
+              {/* ✅ DEBUG: Mostrar breakdown dos valores */}
+              <div className="bg-gray-800 rounded p-2 mb-3 text-xs">
+                <p className="text-gray-400 mb-1">🔍 Debug dos valores:</p>
+                {selectedFatura.transactions
+                  .filter(t => selectedCards.has(t.id))
+                  .map(t => (
+                    <div key={t.id} className="flex justify-between text-gray-300">
+                      <span className="truncate mr-2">{t.descricao_origem.substring(0, 30)}...</span>
+                      <span className={t.valor >= 0 ? 'text-green-400' : 'text-red-400'}>
+                        {t.valor >= 0 ? '+' : ''}R$ {formatCurrency(Math.abs(t.valor))}
+                      </span>
+                    </div>
+                  ))}
+                <div className="border-t border-gray-600 pt-1 mt-1">
+                  <div className="flex justify-between font-medium">
+                    <span>Soma líquida:</span>
+                    <span>R$ {formatCurrency(selectedTotal)}</span>
+                  </div>
+                </div>
+              </div>
+
               {/* Checkbox selecionar todos */}
               <div className="mb-3">
                 <label className="flex items-center gap-2 text-sm text-gray-300">
@@ -303,8 +326,10 @@ export function ReconciliationModal({
                             )}
                           </p>
                         </div>
-                        <span className="text-sm text-red-400 font-medium">
-                          R$ {formatCurrency(Math.abs(cardTx.valor))}
+                        <span className={`text-sm font-medium ${
+                          cardTx.valor >= 0 ? 'text-green-400' : 'text-red-400'
+                        }`}>
+                          {cardTx.valor >= 0 ? '+' : ''}R$ {formatCurrency(Math.abs(cardTx.valor))}
                         </span>
                       </label>
                     ))}

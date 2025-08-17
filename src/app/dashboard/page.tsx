@@ -1,3 +1,5 @@
+// page.tsx - VERSÃO ATUALIZADA COM INTEGRAÇÃO DA PLANILHA FINANCEIRA
+
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -13,6 +15,7 @@ import { useCardTransactions } from '@/hooks/useCardTransactions';
 import BankUpload from '@/components/BankUpload';
 import { NavigationTabs } from '@/components/NavigationTabs';
 import { InboxTab } from '@/components/InboxTab';
+import { ComplexClassificationTab } from '@/components/ComplexClassificationTab'; // ✅ COMPONENT ATUALIZADO
 import { OverviewTab } from '@/components/OverviewTab';
 import { AnalyticsTab } from '@/components/AnalyticsTab';
 import { ContasTab } from '@/components/ContasTab';
@@ -20,6 +23,7 @@ import { CartoesTab } from '@/components/CartoesTab';
 import { EditTransactionModal } from '@/components/EditTransactionModal';
 import { EditCardTransactionModal } from '@/components/EditTransactionModal';
 import { SplitTransactionModal } from '@/components/SplitTransactionModal';
+import { SplitCardTransactionModal } from '@/components/SplitCardTransactionModal';
 import { ReconciliationModal } from '@/components/ReconciliationModal';
 import { SimpleBillDiffModal, BillChanges } from '@/components/SimpleBillDiffModal';
 
@@ -39,8 +43,9 @@ export default function DashboardPage() {
     updateCardTransaction,
     updateMultipleCardTransactions,
     deleteCardTransaction,
-    applySimpleDiffChanges,        // ✅ NOVA FUNÇÃO
-    replaceFaturaComplete,         // ✅ NOVA FUNÇÃO
+    applySimpleDiffChanges,
+    replaceFaturaComplete,
+    splitCardTransaction,
     markAsReconciled,
     getTransactionsForReconciliation
   } = useCardTransactions();
@@ -53,12 +58,13 @@ export default function DashboardPage() {
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [editingCardTransaction, setEditingCardTransaction] = useState<CardTransaction | null>(null);
   const [splitingTransaction, setSplitingTransaction] = useState<Transaction | null>(null);
+  const [splitingCardTransaction, setSplitingCardTransaction] = useState<CardTransaction | null>(null);
   
   // Estados para reconciliação
   const [showReconciliation, setShowReconciliation] = useState(false);
   const [reconciliationTransaction, setReconciliationTransaction] = useState<Transaction | null>(null);
   
-  // ===== ESTADOS PARA SIMPLEDIFF OBRIGATÓRIO =====
+  // Estados para SimpleDiff
   const [showSimpleDiff, setShowSimpleDiff] = useState(false);
   const [simpleDiffData, setSimpleDiffData] = useState<{
     faturaId: string;
@@ -66,11 +72,10 @@ export default function DashboardPage() {
     newBill: CardTransaction[];
   } | null>(null);
 
-  // ===== FUNÇÕES AUXILIARES (MOVIDAS PARA CIMA) =====
+  // ===== FUNÇÕES AUXILIARES =====
   
   // Obter faturas disponíveis para reconciliação
   const getAvailableFaturas = () => {
-    // Agrupar card_transactions classificadas por fatura
     const faturas = new Map<string, CardTransaction[]>();
     
     cardTransactions
@@ -82,25 +87,139 @@ export default function DashboardPage() {
         faturas.get(ct.fatura_id)!.push(ct);
       });
     
-    // Converter para formato esperado pelo ReconciliationModal
     return Array.from(faturas.entries()).map(([faturaId, transactions]) => ({
       faturaId,
       transactions,
-      totalValue: transactions.reduce((sum, t) => sum + Math.abs(t.valor), 0),
+      // ✅ CORREÇÃO: Somar valores respeitando sinais (gastos negativos + estornos positivos)
+      // e depois aplicar Math.abs para mostrar o valor total da fatura
+      totalValue: Math.abs(transactions.reduce((sum, t) => sum + t.valor, 0)),
       month: faturaId.split('_')[1] || '',
       cardCount: transactions.length
     }));
   };
 
-  // Verificar se pode reconciliar
   const canReconcile = () => {
     return getAvailableFaturas().length > 0;
   };
 
-  // ===== CONTADORES PARA BADGES (APÓS AS FUNÇÕES) =====
-  const unclassifiedCount = transactions.filter(t => t.realizado === 'p').length;
-  const unclassifiedCardsCount = cardTransactions.filter(c => c.status === 'pending').length;
+  // ===== FUNÇÕES PARA CLASSIFICAÇÃO COMPLEXA =====
+  
+  // Obter transações na classificação complexa
+  const getComplexTransactions = (): Transaction[] => {
+    return transactions.filter(t => 
+      t.conta === 'COMPLEXA' && 
+      t.categoria === 'COMPLEXA' && 
+      t.subtipo === 'COMPLEXA'
+    );
+  };
+
+  const getComplexCardTransactions = (): CardTransaction[] => {
+    return cardTransactions.filter(c => 
+      c.categoria === 'COMPLEXA' && 
+      c.subtipo === 'COMPLEXA'
+    );
+  };
+
+  // Mover para classificação complexa
+  const handleMoveToComplexClassification = async (transactionId: string): Promise<void> => {
+    try {
+      // Verificar se é transaction ou card
+      const transaction = transactions.find(t => t.id === transactionId);
+      const cardTransaction = cardTransactions.find(c => c.id === transactionId);
+
+      if (transaction) {
+        // Atualizar transaction
+        const updatedTransaction: Transaction = {
+          ...transaction,
+          conta: 'COMPLEXA',
+          categoria: 'COMPLEXA',
+          subtipo: 'COMPLEXA',
+          descricao: transaction.descricao_origem || 'Classificação Complexa',
+          realizado: 'p' // Manter como pendente
+        };
+        
+        await updateTransaction(updatedTransaction);
+        console.log('✅ Transaction movida para classificação complexa:', transactionId);
+        
+      } else if (cardTransaction) {
+        // Atualizar card transaction
+        const updatedCardTransaction: CardTransaction = {
+          ...cardTransaction,
+          categoria: 'COMPLEXA',
+          subtipo: 'COMPLEXA',
+          descricao_classificada: cardTransaction.descricao_origem || 'Classificação Complexa',
+          status: 'pending' // Manter como pendente
+        };
+        
+        await updateCardTransaction(updatedCardTransaction);
+        console.log('✅ CardTransaction movida para classificação complexa:', transactionId);
+        
+      } else {
+        throw new Error('Transação não encontrada');
+      }
+      
+    } catch (error) {
+      console.error('❌ Erro ao mover para classificação complexa:', error);
+      throw error;
+    }
+  };
+
+  // Remover da classificação complexa
+  const handleRemoveFromComplexClassification = async (transactionId: string, type: 'transaction' | 'card'): Promise<void> => {
+    try {
+      if (type === 'transaction') {
+        const transaction = transactions.find(t => t.id === transactionId);
+        if (!transaction) throw new Error('Transaction não encontrada');
+
+        // Reverter para não classificada
+        const updatedTransaction: Transaction = {
+          ...transaction,
+          conta: '',
+          categoria: '',
+          subtipo: '',
+          descricao: transaction.descricao_origem || '',
+          realizado: 'p'
+        };
+        
+        await updateTransaction(updatedTransaction);
+        console.log('✅ Transaction removida da classificação complexa:', transactionId);
+        
+      } else if (type === 'card') {
+        const cardTransaction = cardTransactions.find(c => c.id === transactionId);
+        if (!cardTransaction) throw new Error('CardTransaction não encontrada');
+
+        // Reverter para não classificada
+        const updatedCardTransaction: CardTransaction = {
+          ...cardTransaction,
+          categoria: null,
+          subtipo: null,
+          descricao_classificada: null,
+          status: 'pending'
+        };
+        
+        await updateCardTransaction(updatedCardTransaction);
+        console.log('✅ CardTransaction removida da classificação complexa:', transactionId);
+      }
+      
+    } catch (error) {
+      console.error('❌ Erro ao remover da classificação complexa:', error);
+      throw error;
+    }
+  };
+
+  // ===== CONTADORES PARA BADGES =====
+  const unclassifiedCount = transactions.filter(t => t.realizado === 'p' && 
+    !(t.conta === 'COMPLEXA' && t.categoria === 'COMPLEXA' && t.subtipo === 'COMPLEXA')
+  ).length;
+  
+  const unclassifiedCardsCount = cardTransactions.filter(c => c.status === 'pending' && 
+    !(c.categoria === 'COMPLEXA' && c.subtipo === 'COMPLEXA')
+  ).length;
+  
   const hasReconciliationPending = getAvailableFaturas().length > 0;
+  
+  // ✅ CONTADOR: Transações na classificação complexa
+  const complexCount = getComplexTransactions().length + getComplexCardTransactions().length;
 
   // ===== HANDLERS DE EDIÇÃO =====
   
@@ -126,6 +245,10 @@ export default function DashboardPage() {
     setSplitingTransaction(transaction);
   };
 
+  const handleSplitCardTransaction = (transaction: CardTransaction) => {
+    setSplitingCardTransaction(transaction);
+  };
+
   const handleConfirmSplit = async (parts: Array<{
     categoria: string;
     subtipo: string;
@@ -146,6 +269,60 @@ export default function DashboardPage() {
     }
   };
 
+  const handleBatchMoveToComplexClassification = async (transactionIds: string[]): Promise<void> => {
+    try {
+      console.log('🧩 Movendo', transactionIds.length, 'transações para classificação complexa');
+      
+      let successCount = 0;
+      const errors: string[] = [];
+      
+      // Processar cada transação individualmente
+      for (const transactionId of transactionIds) {
+        try {
+          await handleMoveToComplexClassification(transactionId);
+          successCount++;
+        } catch (error) {
+          console.error(`❌ Erro ao mover transação ${transactionId}:`, error);
+          errors.push(`Transação ${transactionId}: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
+        }
+      }
+      
+      // Relatório final
+      if (successCount > 0) {
+        console.log(`✅ ${successCount} transações movidas com sucesso`);
+      }
+      
+      if (errors.length > 0) {
+        console.warn(`⚠️ ${errors.length} erros durante o processo:`, errors);
+        throw new Error(`${errors.length} transações falharam ao mover`);
+      }
+      
+    } catch (error) {
+      console.error('❌ Erro no batch de classificação complexa:', error);
+      throw error;
+    }
+  };
+
+  const handleConfirmCardSplit = async (parts: Array<{
+    categoria: string;
+    subtipo: string;
+    descricao_classificada: string;
+    valor: number;
+  }>) => {
+    if (!splitingCardTransaction) return;
+    
+    try {
+      const result = await splitCardTransaction(splitingCardTransaction, parts);
+      if (result.success) {
+        alert(`✅ Transação de cartão dividida em ${result.partsCreated} partes!`);
+        setSplitingCardTransaction(null);
+      }
+    } catch (error) {
+      console.error('❌ Erro ao dividir transação de cartão:', error);
+      alert('❌ Erro ao dividir transação de cartão');
+    }
+  };
+
   // ===== HANDLERS DE IMPORTAÇÃO =====
   
   const handleTransactionsImported = async (importedTransactions: Transaction[]) => {
@@ -158,26 +335,22 @@ export default function DashboardPage() {
     }
   };
 
-  // ✅ NOVO HANDLER: Sempre vai para SimpleDiff
   const handleCardTransactionsImported = async (importedCards: CardTransaction[]): Promise<ImportResult> => {
     try {
-      console.log('🔄 Processando importação de cartões (NOVO FLUXO)');
+      console.log('📄 Processando importação de cartões (NOVO FLUXO)');
       
       const result = await addCardTransactions(importedCards);
       
       if (result.requiresSimpleDiff) {
         console.log('📊 Abrindo SimpleDiff...');
         
-        // Configurar dados para SimpleDiff
         setSimpleDiffData({
           faturaId: result.faturaId,
           existingBill: result.existingBill,
           newBill: result.newBill
         });
         
-        // Abrir modal SimpleDiff
         setShowSimpleDiff(true);
-        
         console.log('✅ SimpleDiff configurado e aberto');
       }
       
@@ -189,12 +362,11 @@ export default function DashboardPage() {
     }
   };
 
-  // ✅ NOVO HANDLER: Aplicar mudanças do SimpleDiff
   const handleSimpleDiffApply = async (changes: BillChanges) => {
     if (!simpleDiffData) return;
     
     try {
-      console.log('🔄 Aplicando mudanças do SimpleDiff...');
+      console.log('📄 Aplicando mudanças do SimpleDiff...');
       
       const result = await applySimpleDiffChanges({
         toAdd: changes.toAdd,
@@ -214,7 +386,6 @@ export default function DashboardPage() {
         throw new Error('Falha ao aplicar mudanças');
       }
       
-      // Fechar modal
       setShowSimpleDiff(false);
       setSimpleDiffData(null);
       
@@ -224,12 +395,11 @@ export default function DashboardPage() {
     }
   };
 
-  // ✅ NOVO HANDLER: Substituir tudo
   const handleSimpleDiffReplaceAll = async () => {
     if (!simpleDiffData) return;
     
     try {
-      console.log('🔄 Substituindo fatura completa...');
+      console.log('📄 Substituindo fatura completa...');
       
       const result = await replaceFaturaComplete(
         simpleDiffData.faturaId,
@@ -239,12 +409,11 @@ export default function DashboardPage() {
       if (result.success) {
         alert(`✅ Fatura substituída completamente!\n\n` +
               `📋 ${simpleDiffData.newBill.length} transações importadas\n` +
-              `🔄 Fatura: ${simpleDiffData.faturaId}`);
+              `📄 Fatura: ${simpleDiffData.faturaId}`);
       } else {
         throw new Error('Falha na substituição');
       }
       
-      // Fechar modal
       setShowSimpleDiff(false);
       setSimpleDiffData(null);
       
@@ -254,7 +423,6 @@ export default function DashboardPage() {
     }
   };
 
-  // ✅ NOVO HANDLER: Cancelar SimpleDiff
   const handleSimpleDiffCancel = () => {
     console.log('❌ Importação cancelada pelo usuário');
     setShowSimpleDiff(false);
@@ -273,12 +441,10 @@ export default function DashboardPage() {
     if (!reconciliationTransaction) return;
     
     try {
-      // Buscar as card transactions selecionadas
       const selectedCards = cardTransactions.filter(ct => 
         cardTransactionIds.includes(ct.id)
       );
       
-      // Executar reconciliação completa
       const result = await executeReconciliation(
         reconciliationTransaction,
         selectedCards,
@@ -286,7 +452,6 @@ export default function DashboardPage() {
       );
       
       if (result.success) {
-        // Marcar cards como reconciliadas
         await markAsReconciled(cardTransactionIds);
         
         alert(`✅ Reconciliação concluída!\n\n` +
@@ -307,7 +472,6 @@ export default function DashboardPage() {
 
   // ===== HANDLERS DE CLASSIFICAÇÃO =====
   
-  // Handler para classificação rápida (transactions)
   const handleQuickClassificationTransactions = async (transactionId: string, classification: any) => {
     try {
       const transaction = transactions.find(t => t.id === transactionId);
@@ -329,7 +493,6 @@ export default function DashboardPage() {
     }
   };
 
-  // Handler para classificação rápida (cards)
   const handleQuickClassificationCards = async (cardId: string, classification: any) => {
     try {
       const card = cardTransactions.find(c => c.id === cardId);
@@ -350,7 +513,6 @@ export default function DashboardPage() {
     }
   };
 
-  // Handler para classificação em lote (transactions)
   const handleBatchClassificationTransactions = async (classifications: Array<{
     id: string;
     conta: string;
@@ -382,7 +544,6 @@ export default function DashboardPage() {
     }
   };
 
-  // Handler para classificação em lote (cards)
   const handleBatchClassificationCards = async (classifications: Array<{
     id: string;
     conta: string;
@@ -406,7 +567,6 @@ export default function DashboardPage() {
     }
   };
 
-  // Handler unificado para classificação em lote
   const handleBatchClassification = async (classifications: Array<{
     id: string;
     conta: string;
@@ -414,7 +574,6 @@ export default function DashboardPage() {
     subtipo: string;
     descricao: string;
   }>) => {
-    // Separar por tipo
     const transactionClassifications: typeof classifications = [];
     const cardClassifications: typeof classifications = [];
     
@@ -426,7 +585,6 @@ export default function DashboardPage() {
       }
     });
     
-    // Aplicar classificações
     if (transactionClassifications.length > 0) {
       await handleBatchClassificationTransactions(transactionClassifications);
     }
@@ -469,27 +627,34 @@ export default function DashboardPage() {
         {/* Navegação e conteúdo principal */}
         {(transactions.length > 0 || cardTransactions.length > 0) && (
           <>
-            {/* Nova Navegação com Badges */}
+            {/* Navegação com Badges - ✅ ATUALIZADA COM complexCount */}
             <NavigationTabs
               activeTab={activeTab}
               setActiveTab={setActiveTab}
               unclassifiedCount={unclassifiedCount}
               unclassifiedCardsCount={unclassifiedCardsCount}
               hasReconciliationPending={hasReconciliationPending}
+              complexCount={complexCount} // ✅ NOVA PROP
             />
 
             {/* Conteúdo das abas */}
+            {/* Aba Inbox - ATUALIZADA para incluir a nova função */}
             {activeTab === 'inbox' && (
               <InboxTab
-                unclassifiedTransactions={transactions.filter(t => t.realizado === 'p')}
-                unclassifiedCards={cardTransactions.filter(c => c.status === 'pending')}
+                unclassifiedTransactions={transactions.filter(t => 
+                  t.realizado === 'p' && 
+                  !(t.conta === 'COMPLEXA' && t.categoria === 'COMPLEXA' && t.subtipo === 'COMPLEXA')
+                )}
+                unclassifiedCards={cardTransactions.filter(c => 
+                  c.status === 'pending' && 
+                  !(c.categoria === 'COMPLEXA' && c.subtipo === 'COMPLEXA')
+                )}
                 historicTransactions={transactions.filter(t => t.realizado === 's')}
                 historicCardTransactions={cardTransactions.filter(c => c.status === 'classified')}
                 onEditTransaction={handleEditTransaction}
                 onEditCardTransaction={handleEditCardTransaction}
                 onReconcileTransaction={handleReconciliation}
                 onApplyQuickClassification={async (id, classification) => {
-                  // Determinar se é transaction ou card
                   if (transactions.find(t => t.id === id)) {
                     await handleQuickClassificationTransactions(id, classification);
                   } else {
@@ -497,7 +662,20 @@ export default function DashboardPage() {
                   }
                 }}
                 onApplyBatchClassification={handleBatchClassification}
+                onMoveToComplexClassification={handleMoveToComplexClassification}
                 canReconcile={canReconcile()}
+              />
+            )}
+
+            {/* ✅ NOVA ABA: Classificação Complexa COM PLANILHA INTEGRADA */}
+            {activeTab === 'complex' && (
+              <ComplexClassificationTab
+                complexTransactions={getComplexTransactions()}
+                complexCardTransactions={getComplexCardTransactions()}
+                onEditTransaction={handleEditTransaction}
+                onEditCardTransaction={handleEditCardTransaction}
+                onRemoveFromComplex={handleRemoveFromComplexClassification}
+                onApplyBatchClassification={handleBatchClassification}
               />
             )}
 
@@ -554,7 +732,6 @@ export default function DashboardPage() {
 
         {/* ===== MODAIS ===== */}
         
-        {/* Modal de upload bancário */}
         <BankUpload
           isOpen={showBankUpload}
           onClose={() => setShowBankUpload(false)}
@@ -562,7 +739,6 @@ export default function DashboardPage() {
           onCardTransactionsImported={handleCardTransactionsImported}
         />
 
-        {/* Modal de edição de transações */}
         <EditTransactionModal
           transaction={editingTransaction}
           isOpen={!!editingTransaction}
@@ -573,15 +749,14 @@ export default function DashboardPage() {
           canReconcile={canReconcile()}
         />
 
-        {/* Modal de edição de cartões */}
         <EditCardTransactionModal
           transaction={editingCardTransaction}
           isOpen={!!editingCardTransaction}
           onClose={() => setEditingCardTransaction(null)}
           onSave={handleSaveCardTransaction}
+          onSplit={handleSplitCardTransaction}
         />
 
-        {/* Modal de divisão */}
         <SplitTransactionModal
           transaction={splitingTransaction}
           isOpen={!!splitingTransaction}
@@ -589,7 +764,13 @@ export default function DashboardPage() {
           onSplit={handleConfirmSplit}
         />
 
-        {/* Modal de reconciliação */}
+        <SplitCardTransactionModal
+          transaction={splitingCardTransaction}
+          isOpen={!!splitingCardTransaction}
+          onClose={() => setSplitingCardTransaction(null)}
+          onSplit={handleConfirmCardSplit}
+        />
+
         <ReconciliationModal
           isOpen={showReconciliation}
           transaction={reconciliationTransaction}
@@ -601,7 +782,6 @@ export default function DashboardPage() {
           onConfirm={handleConfirmReconciliation}
         />
 
-        {/* ✅ NOVO MODAL: SimpleDiff OBRIGATÓRIO para todos os uploads de cartão */}
         {showSimpleDiff && simpleDiffData && (
           <SimpleBillDiffModal
             isOpen={showSimpleDiff}
@@ -614,7 +794,7 @@ export default function DashboardPage() {
             }}
             onApply={handleSimpleDiffApply}
             onCancel={handleSimpleDiffCancel}
-            onReplaceAll={handleSimpleDiffReplaceAll} // ✅ NOVA PROP
+            onReplaceAll={handleSimpleDiffReplaceAll}
           />
         )}
       </div>

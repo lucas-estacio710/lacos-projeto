@@ -1,14 +1,14 @@
-// components/BatchClassificationModal.tsx - MODAL DE CLASSIFICAÇÃO EM LOTE ATUALIZADO COM BOTÃO LIMPAR
+// components/BatchClassificationModal.tsx - ATUALIZADO COM BOTÃO CLASSIFICAÇÃO COMPLEXA
 
 import React, { useState, useEffect } from 'react';
 import { Transaction } from '@/types';
 import { CardTransaction } from '@/hooks/useCardTransactions';
-import { categoriesPJ, categoriesPF, categoriesCONC, getCategoriesForAccount } from '@/lib/categories';
+import { getCategoriesForAccount } from '@/lib/categories';
 import { 
   BatchClassificationItem, 
   prepareBatchClassification, 
   validateBatchClassification,
-  SmartSuggestion
+  HistoricItem
 } from '@/lib/smartClassification';
 import { formatCurrency, formatDate } from '@/lib/utils';
 
@@ -25,6 +25,7 @@ interface BatchClassificationModalProps {
     subtipo: string;
     descricao: string;
   }>) => Promise<void>;
+  onMoveToComplexClassification?: (transactionIds: string[]) => Promise<void>; // ✅ NOVA PROP
 }
 
 export function BatchClassificationModal({
@@ -33,13 +34,15 @@ export function BatchClassificationModal({
   unclassifiedTransactions,
   historicTransactions,
   historicCardTransactions = [],
-  onApplyBatch
+  onApplyBatch,
+  onMoveToComplexClassification // ✅ NOVA PROP
 }: BatchClassificationModalProps) {
   const [batchItems, setBatchItems] = useState<BatchClassificationItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [errors, setErrors] = useState<string[]>([]);
-  const [selectedAll, setSelectedAll] = useState(false);
+  const [showHistoric, setShowHistoric] = useState<Record<string, boolean>>({});
+  const [selectedForComplex, setSelectedForComplex] = useState<Set<string>>(new Set()); // ✅ NOVO ESTADO
 
   // Preparar dados quando modal abre
   useEffect(() => {
@@ -47,12 +50,14 @@ export function BatchClassificationModal({
       console.log('📄 Preparando classificação em lote...');
       const prepared = prepareBatchClassification(
         unclassifiedTransactions, 
-        historicTransactions
+        historicTransactions,
+        historicCardTransactions
       );
       setBatchItems(prepared);
       setCurrentIndex(0);
       setErrors([]);
-      setSelectedAll(false);
+      setShowHistoric({});
+      setSelectedForComplex(new Set()); // ✅ RESETAR SELEÇÃO
     }
   }, [isOpen, unclassifiedTransactions, historicTransactions, historicCardTransactions]);
 
@@ -61,7 +66,56 @@ export function BatchClassificationModal({
     return 'fatura_id' in item;
   };
 
-  // ===== FUNÇÃO PARA LIMPAR CLASSIFICAÇÃO =====
+  // ✅ NOVA FUNÇÃO: Toggle seleção para classificação complexa
+  const toggleComplexSelection = (transactionId: string) => {
+    const newSelected = new Set(selectedForComplex);
+    if (newSelected.has(transactionId)) {
+      newSelected.delete(transactionId);
+    } else {
+      newSelected.add(transactionId);
+    }
+    setSelectedForComplex(newSelected);
+  };
+
+  // ✅ NOVA FUNÇÃO: Selecionar todas para complexa
+  const selectAllForComplex = () => {
+    if (selectedForComplex.size === batchItems.length) {
+      setSelectedForComplex(new Set());
+    } else {
+      setSelectedForComplex(new Set(batchItems.map(item => item.id)));
+    }
+  };
+
+  // ✅ NOVA FUNÇÃO: Enviar selecionadas para classificação complexa
+  const handleMoveToComplex = async () => {
+    if (!onMoveToComplexClassification || selectedForComplex.size === 0) {
+      alert('⚠️ Selecione pelo menos uma transação para mover');
+      return;
+    }
+
+    const confirmMove = window.confirm(
+      `🧩 Mover ${selectedForComplex.size} transação${selectedForComplex.size !== 1 ? 'ões' : ''} para Classificação Complexa?\n\n` +
+      `Estas transações ficarão disponíveis na aba "🧩 Classificação Complexa" para processamento avançado.`
+    );
+
+    if (!confirmMove) return;
+
+    setLoading(true);
+    try {
+      await onMoveToComplexClassification(Array.from(selectedForComplex));
+      
+      alert(`✅ ${selectedForComplex.size} transação${selectedForComplex.size !== 1 ? 'ões' : ''} movida${selectedForComplex.size !== 1 ? 's' : ''} para Classificação Complexa!`);
+      
+      onClose();
+    } catch (error) {
+      console.error('❌ Erro ao mover para classificação complexa:', error);
+      alert('❌ Erro ao mover transações');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Limpar classificação
   const clearCurrentClassification = () => {
     setBatchItems(prev => prev.map((item, index) => 
       index === currentIndex 
@@ -70,14 +124,31 @@ export function BatchClassificationModal({
             selectedConta: '',
             selectedCategoria: '',
             selectedSubtipo: '',
-            // Mantém selectedDescricao
+            selectedDescricao: item.transaction.descricao_origem || 'Sem descrição'
           }
         : item
     ));
     
-    // Limpa erros e mostra feedback
     setErrors([]);
     console.log('🗑️ Classificação limpa para transação', currentIndex + 1);
+  };
+
+  // Obter descrições históricas para categoria específica
+  const getHistoricDescriptions = (conta: string, categoria: string, subtipo: string): string[] => {
+    const historicDescriptions = historicTransactions
+      .filter(t => 
+        t.conta === conta && 
+        t.categoria === categoria && 
+        t.subtipo === subtipo &&
+        t.descricao && 
+        t.descricao !== t.descricao_origem &&
+        t.realizado === 's'
+      )
+      .map(t => t.descricao)
+      .filter((desc, index, arr) => arr.indexOf(desc) === index)
+      .slice(0, 5);
+
+    return historicDescriptions;
   };
 
   // Atualizar item específico
@@ -86,13 +157,11 @@ export function BatchClassificationModal({
       const updated = [...prev];
       updated[index] = { ...updated[index], [field]: value };
       
-      // Reset categoria/subtipo se conta mudou
       if (field === 'selectedConta') {
         updated[index].selectedCategoria = '';
         updated[index].selectedSubtipo = '';
       }
       
-      // Reset subtipo se categoria mudou
       if (field === 'selectedCategoria') {
         updated[index].selectedSubtipo = '';
       }
@@ -101,21 +170,36 @@ export function BatchClassificationModal({
     });
   };
 
-  // Aplicar sugestão
-  const applySuggestion = (index: number, suggestion: SmartSuggestion) => {
+  // Aplicar item do histórico
+  const applyHistoricItem = (index: number, historicItem: HistoricItem) => {
     setBatchItems(prev => {
       const updated = [...prev];
       updated[index] = {
         ...updated[index],
-        selectedConta: suggestion.conta,
-        selectedCategoria: suggestion.categoria,
-        selectedSubtipo: suggestion.subtipo
+        selectedConta: historicItem.conta,
+        selectedCategoria: historicItem.categoria,
+        selectedSubtipo: historicItem.subtipo,
+        selectedDescricao: historicItem.descricao
       };
       return updated;
     });
+    
+    // Fechar lista após seleção
+    setShowHistoric(prev => ({
+      ...prev,
+      [currentIndex]: false
+    }));
   };
 
-  // Aplicar classificação para todos os selecionados
+  // Toggle lista do histórico
+  const toggleHistoric = (index: number) => {
+    setShowHistoric(prev => ({
+      ...prev,
+      [index]: !prev[index]
+    }));
+  };
+
+  // Aplicar classificação para todos
   const applyToSelected = () => {
     const current = batchItems[currentIndex];
     if (!current.selectedConta || !current.selectedCategoria || !current.selectedSubtipo) {
@@ -127,10 +211,9 @@ export function BatchClassificationModal({
       ...item,
       selectedConta: current.selectedConta,
       selectedCategoria: current.selectedCategoria,
-      selectedSubtipo: current.selectedSubtipo
+      selectedSubtipo: current.selectedSubtipo,
+      selectedDescricao: current.selectedDescricao
     })));
-
-    setSelectedAll(true);
   };
 
   // Navegação
@@ -146,7 +229,7 @@ export function BatchClassificationModal({
     }
   };
 
-  // ===== VALIDAÇÃO ATUALIZADA PARA ACEITAR VAZIO =====
+  // Validação
   const validateBatchClassificationUpdated = (items: BatchClassificationItem[]): {
     valid: BatchClassificationItem[];
     invalid: BatchClassificationItem[];
@@ -158,9 +241,8 @@ export function BatchClassificationModal({
 
     items.forEach((item, index) => {
       const hasAnyField = item.selectedConta || item.selectedCategoria || item.selectedSubtipo;
-      const hasAllRequiredFields = item.selectedConta && item.selectedCategoria && item.selectedSubtipo;
+      const hasAllRequiredFields = item.selectedConta && item.selectedCategoria && item.selectedSubtipo && item.selectedDescricao;
       
-      // Aceita completamente vazio OU completamente preenchido
       if (!hasAnyField || hasAllRequiredFields) {
         valid.push(item);
       } else {
@@ -182,11 +264,9 @@ export function BatchClassificationModal({
       return;
     }
 
-    // Separar classificadas vs não classificadas
-    const classified = validation.valid.filter(item => item.selectedConta && item.selectedCategoria && item.selectedSubtipo);
-    const unclassified = validation.valid.filter(item => !item.selectedConta || !item.selectedCategoria || !item.selectedSubtipo);
+    const classified = validation.valid.filter(item => item.selectedConta && item.selectedCategoria && item.selectedSubtipo && item.selectedDescricao);
+    const unclassified = validation.valid.filter(item => !item.selectedConta || !item.selectedCategoria || !item.selectedSubtipo || !item.selectedDescricao);
     
-    // Confirmar se nenhuma será classificada
     if (classified.length === 0 && unclassified.length > 0) {
       const confirm = window.confirm(
         `⚠️ Todas as ${unclassified.length} transações ficarão não classificadas. Tem certeza?`
@@ -199,7 +279,7 @@ export function BatchClassificationModal({
       conta: item.selectedConta!,
       categoria: item.selectedCategoria!,
       subtipo: item.selectedSubtipo!,
-      descricao: item.selectedDescricao || item.transaction.descricao_origem || 'Sem descrição'
+      descricao: item.selectedDescricao!
     }));
 
     setLoading(true);
@@ -225,9 +305,10 @@ export function BatchClassificationModal({
 
   // Calcular resumo
   const classificationSummary = {
-    classified: batchItems.filter(item => item.selectedConta && item.selectedCategoria && item.selectedSubtipo).length,
-    unclassified: batchItems.filter(item => !item.selectedConta || !item.selectedCategoria || !item.selectedSubtipo).length,
-    withSuggestion: batchItems.filter(item => item.suggestedClassification).length
+    classified: batchItems.filter(item => item.selectedConta && item.selectedCategoria && item.selectedSubtipo && item.selectedDescricao).length,
+    unclassified: batchItems.filter(item => !item.selectedConta || !item.selectedCategoria || !item.selectedSubtipo || !item.selectedDescricao).length,
+    withSimilar: batchItems.filter(item => item.historicSimilar && item.historicSimilar.length > 0).length,
+    selectedForComplex: selectedForComplex.size // ✅ NOVO
   };
 
   return (
@@ -248,6 +329,41 @@ export function BatchClassificationModal({
             </button>
           </div>
 
+          {/* ✅ NOVA SEÇÃO: Seleção para Classificação Complexa */}
+          {onMoveToComplexClassification && (
+            <div className="mb-6 bg-orange-900/30 border border-orange-700 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="font-medium text-orange-100 flex items-center gap-2">
+                  <span>🧩</span>
+                  Classificação Complexa
+                  {selectedForComplex.size > 0 && (
+                    <span className="bg-orange-700 text-orange-200 px-2 py-1 rounded-full text-sm">
+                      {selectedForComplex.size} selecionada{selectedForComplex.size !== 1 ? 's' : ''}
+                    </span>
+                  )}
+                </h4>
+                <div className="flex gap-2">
+                  <button
+                    onClick={selectAllForComplex}
+                    className="px-3 py-1 bg-orange-600 hover:bg-orange-500 text-white rounded text-sm transition-colors"
+                  >
+                    {selectedForComplex.size === batchItems.length ? 'Desmarcar Todas' : 'Selecionar Todas'}
+                  </button>
+                  <button
+                    onClick={handleMoveToComplex}
+                    disabled={loading || selectedForComplex.size === 0}
+                    className="px-3 py-1 bg-orange-600 hover:bg-orange-500 disabled:bg-gray-600 disabled:text-gray-400 text-white rounded text-sm transition-colors"
+                  >
+                    {loading ? '⏳' : '🧩'} Mover para Complexa
+                  </button>
+                </div>
+              </div>
+              <p className="text-orange-300 text-sm">
+                ✨ Transações difíceis de classificar? Envie para ferramentas avançadas de IA!
+              </p>
+            </div>
+          )}
+
           {/* Progress Bar */}
           <div className="mb-6">
             <div className="flex justify-between text-sm text-gray-400 mb-2">
@@ -266,14 +382,30 @@ export function BatchClassificationModal({
             <>
               {/* Transação Atual */}
               <div className="bg-gradient-to-r from-blue-900 to-blue-800 rounded-lg p-4 mb-6 border border-blue-700">
-                <h4 className="font-medium text-blue-100 mb-3">
-                  📋 Transação {currentIndex + 1}/{batchItems.length}
-                  {isCardTransaction(currentItem.transaction) && (
-                    <span className="ml-2 text-xs bg-purple-700 text-purple-200 px-2 py-1 rounded">
-                      {currentItem.transaction.fatura_id}
-                    </span>
-                  )}
-                </h4>
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="font-medium text-blue-100">
+                    📋 Transação {currentIndex + 1}/{batchItems.length}
+                    {isCardTransaction(currentItem.transaction) && (
+                      <span className="ml-2 text-xs bg-purple-700 text-purple-200 px-2 py-1 rounded">
+                        {currentItem.transaction.fatura_id}
+                      </span>
+                    )}
+                  </h4>
+                  
+                  {/* ✅ NOVO: Checkbox para classificação complexa na transação atual */}
+                  <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-2 text-orange-300 text-sm cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedForComplex.has(currentItem.id)}
+                        onChange={() => toggleComplexSelection(currentItem.id)}
+                        className="w-4 h-4 rounded border-orange-500 bg-orange-900 text-orange-600"
+                      />
+                      🧩 Complexa
+                    </label>
+                  </div>
+                </div>
+                
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
                     <label className="text-blue-300">Data:</label>
@@ -292,8 +424,8 @@ export function BatchClassificationModal({
                     </p>
                   </div>
                   <div className="col-span-2">
-                    <label className="text-blue-300">Descrição:</label>
-                    <p className="text-blue-100 break-words">
+                    <label className="text-blue-300">Descrição Original:</label>
+                    <p className="text-blue-100 break-words font-medium">
                       {currentItem.transaction.descricao_origem}
                     </p>
                   </div>
@@ -308,28 +440,81 @@ export function BatchClassificationModal({
                 </div>
               </div>
 
-              {/* Sugestões Inteligentes */}
-              {currentItem.suggestedClassification && (
-                <div className="bg-green-900 border border-green-700 rounded-lg p-4 mb-4">
-                  <h4 className="font-medium text-green-100 mb-3 flex items-center gap-2">
-                    <span>🤖</span>
-                    Sugestão Inteligente
-                    <span className="text-xs bg-green-700 text-green-100 px-2 py-1 rounded">
-                      {Math.round(currentItem.suggestedClassification.confidence * 100)}% confiança
-                    </span>
-                  </h4>
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm text-green-200">
-                      <p>{currentItem.suggestedClassification.conta} → {currentItem.suggestedClassification.categoria} → {currentItem.suggestedClassification.subtipo}</p>
-                      <p className="text-green-300 text-xs mt-1">{currentItem.suggestedClassification.reason}</p>
-                    </div>
+              {/* Lista de Histórico Similar */}
+              {currentItem.historicSimilar && currentItem.historicSimilar.length > 0 && (
+                <div className="bg-gray-700 rounded-lg p-4 mb-4 border border-gray-600">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="font-medium text-gray-100 flex items-center gap-2">
+                      <span>📚</span>
+                      Histórico Similar ({currentItem.historicSimilar.length})
+                      {currentItem.historicSimilar[0] && (
+                        <span className="text-xs bg-green-700 text-green-200 px-2 py-1 rounded">
+                          Melhor: {Math.round(currentItem.historicSimilar[0].similarity * 100)}%
+                        </span>
+                      )}
+                    </h4>
                     <button
-                      onClick={() => applySuggestion(currentIndex, currentItem.suggestedClassification!)}
-                      className="px-3 py-1 bg-green-600 hover:bg-green-500 text-white rounded text-sm transition-colors"
+                      onClick={() => toggleHistoric(currentIndex)}
+                      className="text-blue-400 hover:text-blue-300 text-sm"
                     >
-                      Aplicar
+                      {showHistoric[currentIndex] ? '▼ Ocultar' : '▶ Mostrar'} Lista
                     </button>
                   </div>
+                  
+                  {showHistoric[currentIndex] && (
+                    <div className="space-y-2 max-h-60 overflow-y-auto">
+                      {currentItem.historicSimilar.map((item, idx) => (
+                        <div
+                          key={`${item.id}-${idx}`}
+                          className="border border-gray-600 rounded-lg p-3 hover:bg-gray-600 cursor-pointer transition-colors"
+                          onClick={() => applyHistoricItem(currentIndex, item)}
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                              <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                item.similarity > 0.8 ? 'bg-green-700 text-green-200' :
+                                item.similarity > 0.6 ? 'bg-yellow-700 text-yellow-200' :
+                                'bg-gray-700 text-gray-300'
+                              }`}>
+                                {Math.round(item.similarity * 100)}%
+                              </span>
+                              <span className={`px-2 py-1 rounded text-xs ${
+                                item.type === 'transaction' ? 'bg-blue-600 text-blue-100' : 'bg-purple-600 text-purple-100'
+                              }`}>
+                                {item.type === 'transaction' ? '🏦 Bancária' : '💳 Cartão'}
+                              </span>
+                            </div>
+                            <div className="text-right">
+                              <span className={`text-sm font-medium ${item.valor >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                R$ {formatCurrency(Math.abs(item.valor))}
+                              </span>
+                            </div>
+                          </div>
+                          
+                          <div className="text-sm">
+                            <p className="text-gray-200 font-medium mb-1">"{item.descricao_origem}"</p>
+                            <div className="text-xs text-gray-400 grid grid-cols-2 gap-2">
+                              <div>
+                                <span>📋 Classificação:</span>
+                                <span className="text-blue-300 ml-1">{item.conta} → {item.categoria}</span>
+                              </div>
+                              <div>
+                                <span>📝 Descrição:</span>
+                                <span className="text-green-300 ml-1">"{item.descricao}"</span>
+                              </div>
+                            </div>
+                            <div className="text-xs text-gray-500 mt-1">
+                              {formatDate(item.data)} • {item.origem}
+                            </div>
+                          </div>
+                          
+                          <div className="mt-2 text-center">
+                            <span className="text-xs text-blue-400">👆 Clique para aplicar esta classificação</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -344,7 +529,8 @@ export function BatchClassificationModal({
                 <div className="bg-blue-900/30 border border-blue-700 rounded-lg p-2 mb-3">
                   <div className="flex items-center gap-2 text-blue-200 text-sm">
                     📋 <span>
-                      Categoria: <strong>{currentItem.selectedCategoria}</strong> → <strong>{currentItem.selectedSubtipo}</strong>
+                      {currentItem.selectedConta} → {currentItem.selectedCategoria} → {currentItem.selectedSubtipo}
+                      {currentItem.selectedDescricao && ` → "${currentItem.selectedDescricao}"`}
                     </span>
                   </div>
                 </div>
@@ -352,22 +538,17 @@ export function BatchClassificationModal({
 
               {/* Formulário de Classificação */}
               <div className="space-y-4 mb-6">
-                {/* Header do formulário com botão limpar */}
                 <div className="flex items-center justify-between">
                   <h4 className="font-medium text-gray-100">📝 Classificação</h4>
-                  
-                  {/* BOTÃO LIMPAR CLASSIFICAÇÃO */}
                   <button
                     onClick={clearCurrentClassification}
                     className="px-3 py-1 bg-gray-600 hover:bg-gray-500 text-white rounded text-sm transition-colors flex items-center gap-2"
-                    title="Remove a classificação sugerida, deixando como não classificado"
                   >
                     🗑️ Limpar
                   </button>
                 </div>
 
                 <div className="grid grid-cols-3 gap-3">
-                  {/* Conta */}
                   <div>
                     <label className="text-sm text-gray-400 block mb-1">Conta</label>
                     <select
@@ -382,7 +563,6 @@ export function BatchClassificationModal({
                     </select>
                   </div>
 
-                  {/* Categoria */}
                   <div>
                     <label className="text-sm text-gray-400 block mb-1">Categoria</label>
                     <select
@@ -398,7 +578,6 @@ export function BatchClassificationModal({
                     </select>
                   </div>
 
-                  {/* Subtipo */}
                   <div>
                     <label className="text-sm text-gray-400 block mb-1">Subtipo</label>
                     <select
@@ -416,9 +595,39 @@ export function BatchClassificationModal({
                   </div>
                 </div>
 
-                {/* Descrição */}
                 <div>
-                  <label className="text-sm text-gray-400 block mb-1">Descrição</label>
+                  <label className="text-sm text-gray-400 block mb-1">Descrição *</label>
+                  
+                  {currentItem.selectedConta && currentItem.selectedCategoria && currentItem.selectedSubtipo && (
+                    <div className="mb-2 bg-blue-900/20 border border-blue-700 rounded-lg p-2">
+                      <p className="text-xs text-blue-300 mb-2">🔍 Sugestões:</p>
+                      <div className="flex flex-wrap gap-1">
+                        <button
+                          type="button"
+                          onClick={() => updateItem(currentIndex, 'selectedDescricao', currentItem.transaction.descricao_origem)}
+                          className="px-2 py-1 bg-gray-600 hover:bg-gray-500 text-white rounded text-xs transition-colors"
+                        >
+                          📋 Original
+                        </button>
+                        
+                        {getHistoricDescriptions(
+                          currentItem.selectedConta, 
+                          currentItem.selectedCategoria, 
+                          currentItem.selectedSubtipo
+                        ).slice(0, 3).map(desc => (
+                          <button
+                            key={desc}
+                            type="button"
+                            onClick={() => updateItem(currentIndex, 'selectedDescricao', desc)}
+                            className="px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs transition-colors"
+                          >
+                            💡 {desc.length > 12 ? desc.substring(0, 12) + '...' : desc}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
                   <input
                     type="text"
                     value={currentItem.selectedDescricao || ''}
@@ -434,7 +643,7 @@ export function BatchClassificationModal({
                 <button
                   onClick={applyToSelected}
                   className="px-3 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded text-sm transition-colors"
-                  disabled={!currentItem.selectedConta || !currentItem.selectedCategoria || !currentItem.selectedSubtipo}
+                  disabled={!currentItem.selectedConta || !currentItem.selectedCategoria || !currentItem.selectedSubtipo || !currentItem.selectedDescricao}
                 >
                   🎯 Aplicar a Todas
                 </button>
@@ -476,7 +685,7 @@ export function BatchClassificationModal({
           {/* Resumo */}
           <div className="bg-gray-700 rounded-lg p-4 mb-6">
             <h4 className="font-medium text-gray-100 mb-2">📊 Resumo</h4>
-            <div className="grid grid-cols-3 gap-4 text-sm">
+            <div className="grid grid-cols-4 gap-4 text-sm">
               <div className="text-center">
                 <p className="text-green-400 text-lg font-bold">{classificationSummary.classified}</p>
                 <p className="text-gray-300">Classificadas</p>
@@ -486,8 +695,13 @@ export function BatchClassificationModal({
                 <p className="text-gray-300">Não Classificadas</p>
               </div>
               <div className="text-center">
-                <p className="text-blue-400 text-lg font-bold">{classificationSummary.withSuggestion}</p>
-                <p className="text-gray-300">Com Sugestão</p>
+                <p className="text-blue-400 text-lg font-bold">{classificationSummary.withSimilar}</p>
+                <p className="text-gray-300">Com Histórico</p>
+              </div>
+              {/* ✅ NOVA COLUNA */}
+              <div className="text-center">
+                <p className="text-orange-400 text-lg font-bold">{classificationSummary.selectedForComplex}</p>
+                <p className="text-gray-300">Para Complexa</p>
               </div>
             </div>
           </div>
@@ -526,10 +740,10 @@ export function BatchClassificationModal({
           {/* Dicas */}
           <div className="mt-4 pt-4 border-t border-gray-600">
             <div className="text-xs text-gray-400 space-y-1">
-              <p>💡 Use as sugestões inteligentes quando disponíveis para acelerar o processo</p>
-              <p>💡 "Aplicar a Todas" replica a classificação atual para todas as transações restantes</p>
-              <p>💡 🗑️ "Limpar" remove a classificação deixando como não classificado</p>
-              <p>💡 As sugestões são baseadas no seu histórico de transações similares</p>
+              <p>📚 Lista mostra até 8 transações similares baseadas na descrição original</p>
+              <p>👆 Clique em qualquer item do histórico para aplicar a classificação</p>
+              <p>🎯 "Aplicar a Todas" replica a classificação atual para todas as transações</p>
+              <p>🧩 Use "Para Complexa" para transações que precisam de IA ou ferramentas avançadas</p>
             </div>
           </div>
         </div>

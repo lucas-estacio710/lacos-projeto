@@ -1,7 +1,8 @@
-// components/InboxTab.tsx - COM CAMPO DE BUSCA POR DESCRIÇÃO
+// components/InboxTab.tsx - VERSÃO COMPLETA COM FILTROS DE RECONCILIAÇÃO
+
 import React, { useState } from 'react';
 import { Search } from 'lucide-react';
-import { Transaction } from '@/types';
+import { Transaction, countsInBalance } from '@/types';
 import { CardTransaction } from '@/hooks/useCardTransactions';
 import { EnhancedUnclassifiedSection } from '@/components/EnhancedUnclassifiedSection';
 import { BatchClassificationModal } from '@/components/BatchClassificationModal';
@@ -22,6 +23,7 @@ interface InboxTabProps {
     subtipo: string;
     descricao: string;
   }>) => Promise<void>;
+  onMoveToComplexClassification: (transactionId: string) => Promise<void>;
   canReconcile: boolean;
 }
 
@@ -35,18 +37,37 @@ export function InboxTab({
   onReconcileTransaction,
   onApplyQuickClassification,
   onApplyBatchClassification,
+  onMoveToComplexClassification,
   canReconcile
 }: InboxTabProps) {
   const [viewMode, setViewMode] = useState<'all' | 'transactions' | 'cards'>('all');
   const [showBatchModal, setShowBatchModal] = useState(false);
-  const [sortBy, setSortBy] = useState<'date' | 'value' | 'origin'>('date');
-  
-  // ===== NOVO: Estado para busca =====
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedOrigin, setSelectedOrigin] = useState('todos');
 
-  const totalPending = unclassifiedTransactions.length + unclassifiedCards.length;
+  // ✅ FILTRAR APENAS TRANSAÇÕES QUE NÃO CONTAM NO SALDO (realizado = 'p')
+  const filteredUnclassifiedTransactions = unclassifiedTransactions.filter(t => 
+    t.realizado === 'p' // Apenas pendentes na caixa de entrada
+  );
+  
+  // ✅ FILTRAR APENAS CARDS PENDENTES
+  const filteredUnclassifiedCards = unclassifiedCards.filter(c => 
+    c.status === 'pending'
+  );
 
-  // ===== NOVA FUNÇÃO: Filtrar por busca =====
+  const totalPending = filteredUnclassifiedTransactions.length + filteredUnclassifiedCards.length;
+
+  // ===== FUNÇÃO PARA OBTER ORIGENS DISPONÍVEIS =====
+  const getAvailableOrigins = () => {
+    const allOrigins = [
+      ...filteredUnclassifiedTransactions.map(t => t.origem),
+      ...filteredUnclassifiedCards.map(c => c.origem)
+    ];
+    
+    return [...new Set(allOrigins)].filter(Boolean).sort();
+  };
+
+  // ===== FUNÇÕES ATUALIZADAS: Aplicar filtros =====
   const filterBySearch = <T extends { descricao_origem: string }>(items: T[]): T[] => {
     if (!searchTerm.trim()) return items;
     
@@ -56,27 +77,38 @@ export function InboxTab({
     );
   };
 
-  // ===== FUNÇÕES ATUALIZADAS: Aplicar filtro de busca =====
+  const filterByOrigin = <T extends { origem: string }>(items: T[]): T[] => {
+    if (selectedOrigin === 'todos') return items;
+    return items.filter(item => item.origem === selectedOrigin);
+  };
+
+  // ===== FUNÇÕES PRINCIPAIS: Aplicar todos os filtros =====
   const getFilteredTransactions = () => {
-    return filterBySearch(unclassifiedTransactions);
+    return filterByOrigin(filterBySearch(filteredUnclassifiedTransactions));
   };
 
   const getFilteredCards = () => {
-    return filterBySearch(unclassifiedCards);
+    return filterByOrigin(filterBySearch(filteredUnclassifiedCards));
   };
 
-  // Estatísticas rápidas (agora considerando filtro)
+  // Estatísticas rápidas (agora considerando todos os filtros)
   const filteredTransactions = getFilteredTransactions();
   const filteredCards = getFilteredCards();
   const filteredTotal = filteredTransactions.length + filteredCards.length;
 
+  // ===== CÁLCULO DO SOMATÓRIO DE VALORES =====
+  const calculateTotalValue = () => {
+    const transactionsValue = filteredTransactions.reduce((sum, t) => sum + Math.abs(t.valor), 0);
+    const cardsValue = filteredCards.reduce((sum, c) => sum + Math.abs(c.valor), 0);
+    return transactionsValue + cardsValue;
+  };
+
+  const totalValue = calculateTotalValue();
+
   const stats = {
     transactions: filteredTransactions.length,
     cards: filteredCards.length,
-    totalValue: [
-      ...filteredTransactions,
-      ...filteredCards
-    ].reduce((sum, t) => sum + Math.abs(t.valor), 0),
+    totalValue: totalValue,
     oldestDays: calculateOldestDays(filteredTransactions[0]?.data)
   };
 
@@ -89,28 +121,6 @@ export function InboxTab({
     return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
   }
 
-  function sortTransactions<T extends { valor: number; origem: string }>(
-    items: T[],
-    sortBy: 'date' | 'value' | 'origin'
-  ): T[] {
-    const sorted = [...items];
-    
-    switch (sortBy) {
-      case 'date':
-        return sorted.sort((a: any, b: any) => {
-          const dateA = a.data || a.data_transacao || '';
-          const dateB = b.data || b.data_transacao || '';
-          return dateB.localeCompare(dateA);
-        });
-      case 'value':
-        return sorted.sort((a, b) => Math.abs(b.valor) - Math.abs(a.valor));
-      case 'origin':
-        return sorted.sort((a, b) => a.origem.localeCompare(b.origem));
-      default:
-        return sorted;
-    }
-  }
-
   function formatCurrency(value: number): string {
     return value.toLocaleString('pt-BR', {
       minimumFractionDigits: 2,
@@ -118,10 +128,13 @@ export function InboxTab({
     });
   }
 
-  // ===== FUNÇÃO ATUALIZADA: Limpar busca =====
-  const clearSearch = () => {
+  // ===== FUNÇÃO ATUALIZADA: Limpar filtros =====
+  const clearFilters = () => {
     setSearchTerm('');
+    setSelectedOrigin('todos');
   };
+
+  const availableOrigins = getAvailableOrigins();
 
   return (
     <div className="space-y-4">
@@ -160,15 +173,15 @@ export function InboxTab({
           <div className="bg-white/10 rounded-lg p-3">
             <p className="text-xs opacity-75">Transações</p>
             <p className="text-2xl font-bold">{stats.transactions}</p>
-            {searchTerm && (
-              <p className="text-xs opacity-75">de {unclassifiedTransactions.length}</p>
+            {(searchTerm || selectedOrigin !== 'todos') && (
+              <p className="text-xs opacity-75">de {filteredUnclassifiedTransactions.length}</p>
             )}
           </div>
           <div className="bg-white/10 rounded-lg p-3">
             <p className="text-xs opacity-75">Cartões</p>
             <p className="text-2xl font-bold">{stats.cards}</p>
-            {searchTerm && (
-              <p className="text-xs opacity-75">de {unclassifiedCards.length}</p>
+            {(searchTerm || selectedOrigin !== 'todos') && (
+              <p className="text-xs opacity-75">de {filteredUnclassifiedCards.length}</p>
             )}
           </div>
           <div className="bg-white/10 rounded-lg p-3">
@@ -182,8 +195,9 @@ export function InboxTab({
         </div>
       </div>
 
-      {/* ===== NOVA SEÇÃO: Campo de Busca ===== */}
+      {/* ===== SEÇÃO DE FILTROS ===== */}
       <div className="bg-gray-800 p-4 rounded-lg border border-gray-700">
+        {/* Campo de busca */}
         <div className="flex items-center gap-3 mb-3">
           <Search className="w-5 h-5 text-gray-400" />
           <div className="flex-1 relative">
@@ -196,39 +210,73 @@ export function InboxTab({
             />
             {searchTerm && (
               <button
-                onClick={clearSearch}
+                onClick={() => setSearchTerm('')}
                 className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-200"
                 title="Limpar busca"
               >
-                ❌
+                ✕
               </button>
             )}
           </div>
         </div>
 
+        {/* Filtro por origem */}
+        <div className="flex items-center gap-3 mb-3">
+          <label className="text-sm text-gray-400 min-w-[60px]">Origem:</label>
+          <select
+            value={selectedOrigin}
+            onChange={(e) => setSelectedOrigin(e.target.value)}
+            className="px-3 py-2 bg-gray-700 border border-gray-600 rounded text-sm text-gray-100 flex-1"
+          >
+            <option value="todos">Todas as origens</option>
+            {availableOrigins.map(origem => (
+              <option key={origem} value={origem}>{origem}</option>
+            ))}
+          </select>
+        </div>
+
         {/* Indicador de resultados da busca */}
-        {searchTerm && (
-          <div className="flex items-center justify-between text-sm">
-            <div className="text-gray-300">
-              🔍 Buscando por: <span className="font-medium text-blue-400">"{searchTerm}"</span>
+        {(searchTerm || selectedOrigin !== 'todos') && (
+          <div className="flex items-center justify-between text-sm mb-3">
+            <div className="text-gray-300 flex items-center gap-2">
+              {searchTerm && (
+                <span>
+                  🔍 Busca: <span className="font-medium text-blue-400">"{searchTerm}"</span>
+                </span>
+              )}
+              {searchTerm && selectedOrigin !== 'todos' && <span>•</span>}
+              {selectedOrigin !== 'todos' && (
+                <span>
+                  🏦 Origem: <span className="font-medium text-green-400">{selectedOrigin}</span>
+                </span>
+              )}
             </div>
-            <div className="text-gray-400">
-              {filteredTotal} de {totalPending} transações
+            <div className="text-gray-400 flex items-center gap-4">
+              <span>{filteredTotal} de {totalPending} transações</span>
+              <span className="font-bold text-yellow-300">
+                R$ {formatCurrency(totalValue)}
+              </span>
+              <button
+                onClick={clearFilters}
+                className="text-blue-400 hover:text-blue-300 text-xs underline"
+              >
+                Limpar filtros
+              </button>
             </div>
           </div>
         )}
 
         {/* Dica de uso */}
-        {!searchTerm && (
-          <div className="text-xs text-gray-500 mt-2">
-            💡 Dica: Digite palavras-chave como "Posto", "Supermercado", "PIX" para filtrar transações similares e classificar em lote
+        {!searchTerm && selectedOrigin === 'todos' && (
+          <div className="text-xs text-gray-500">
+            💡 Dica: Use os filtros acima para encontrar transações específicas. Use o botão 🧩 para classificação complexa.
           </div>
         )}
       </div>
 
-      {/* Filtros e Visualização */}
+      {/* Filtros de visualização */}
       <div className="bg-gray-800 p-4 rounded-lg border border-gray-700">
-        <div className="flex flex-wrap gap-3">
+        <div className="flex items-center justify-between">
           {/* Seletor de Visualização */}
           <div className="flex bg-gray-700 rounded-lg p-1">
             <button
@@ -263,16 +311,18 @@ export function InboxTab({
             </button>
           </div>
 
-          {/* Ordenação */}
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as any)}
-            className="px-3 py-1 bg-gray-700 border border-gray-600 rounded text-sm text-gray-100"
-          >
-            <option value="date">📅 Mais Recentes</option>
-            <option value="value">💰 Maior Valor</option>
-            <option value="origin">🏦 Por Origem</option>
-          </select>
+          {/* Valor total das transações filtradas */}
+          <div className="bg-gray-700 px-4 py-2 rounded-lg">
+            <div className="flex items-center gap-2">
+              <span className="text-gray-400 text-sm">Total filtrado:</span>
+              <span className="font-bold text-lg text-yellow-300">
+                R$ {formatCurrency(totalValue)}
+              </span>
+            </div>
+            <div className="text-xs text-gray-500">
+              {filteredTotal} transação{filteredTotal !== 1 ? 'ões' : ''}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -280,26 +330,26 @@ export function InboxTab({
       {filteredTotal === 0 ? (
         <div className="bg-gradient-to-br from-green-900 to-green-800 p-12 rounded-lg border border-green-700 text-center">
           <div className="text-6xl mb-4">
-            {searchTerm ? '🔍' : '🎉'}
+            {searchTerm || selectedOrigin !== 'todos' ? '🔍' : '🎉'}
           </div>
           <h3 className="text-2xl font-bold text-green-100 mb-2">
-            {searchTerm 
-              ? `Nenhum resultado para "${searchTerm}"`
+            {searchTerm || selectedOrigin !== 'todos'
+              ? 'Nenhum resultado encontrado'
               : 'Parabéns! Tudo Classificado!'
             }
           </h3>
           <p className="text-green-300">
-            {searchTerm 
-              ? 'Tente termos diferentes ou limpe a busca para ver todas as transações'
+            {searchTerm || selectedOrigin !== 'todos'
+              ? 'Tente termos diferentes ou limpe os filtros para ver todas as transações'
               : 'Você não tem nenhuma transação pendente de classificação.'
             }
           </p>
-          {searchTerm ? (
+          {(searchTerm || selectedOrigin !== 'todos') ? (
             <button
-              onClick={clearSearch}
+              onClick={clearFilters}
               className="mt-4 px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg transition-colors"
             >
-              🔄 Limpar Busca
+              🔄 Limpar Filtros
             </button>
           ) : (
             <p className="text-green-400 text-sm mt-4">
@@ -312,13 +362,14 @@ export function InboxTab({
           {/* Transações Bancárias */}
           {(viewMode === 'all' || viewMode === 'transactions') && filteredTransactions.length > 0 && (
             <EnhancedUnclassifiedSection
-              transactions={sortTransactions(filteredTransactions, sortBy)}
+              transactions={filteredTransactions}
               historicTransactions={historicTransactions}
               historicCardTransactions={historicCardTransactions}
               onEditTransaction={onEditTransaction}
               onReconcileTransaction={onReconcileTransaction}
               onApplyQuickClassification={onApplyQuickClassification}
               onApplyBatchClassification={onApplyBatchClassification}
+              onMoveToComplexClassification={onMoveToComplexClassification}
               canReconcile={canReconcile}
               type="transactions"
               title="🏦 Transações Bancárias Não Classificadas"
@@ -328,12 +379,13 @@ export function InboxTab({
           {/* Transações de Cartão */}
           {(viewMode === 'all' || viewMode === 'cards') && filteredCards.length > 0 && (
             <EnhancedUnclassifiedSection
-              cardTransactions={sortTransactions(filteredCards, sortBy)}
+              cardTransactions={filteredCards}
               historicTransactions={historicTransactions}
               historicCardTransactions={historicCardTransactions}
               onEditCardTransaction={onEditCardTransaction}
               onApplyQuickClassification={onApplyQuickClassification}
               onApplyBatchClassification={onApplyBatchClassification}
+              onMoveToComplexClassification={onMoveToComplexClassification}
               type="cards"
               title="💳 Transações de Cartão Não Classificadas"
             />
@@ -353,19 +405,25 @@ export function InboxTab({
           historicTransactions={historicTransactions}
           historicCardTransactions={historicCardTransactions}
           onApplyBatch={onApplyBatchClassification}
+          onMoveToComplexClassification={async (transactionIds: string[]) => {
+            // Executar para cada transação individualmente
+            for (const id of transactionIds) {
+              await onMoveToComplexClassification(id);
+            }
+          }}
         />
       )}
 
-      {/* Dicas e Atalhos - Atualizada com dica de busca */}
+      {/* Dicas e Atalhos - Atualizada */}
       <div className="bg-blue-900 border border-blue-700 rounded-lg p-4">
         <h4 className="font-medium text-blue-100 mb-2">💡 Dicas de Produtividade</h4>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-blue-200">
           <div>🔍 Use <kbd className="px-1 py-0.5 bg-blue-800 rounded">busca</kbd> para filtrar por descrição</div>
+          <div>🏦 Use <kbd className="px-1 py-0.5 bg-blue-800 rounded">origem</kbd> para filtrar por banco/cartão</div>
           <div>🚀 Use <kbd className="px-1 py-0.5 bg-blue-800 rounded">⚡</kbd> para classificação em lote</div>
+          <div>🧩 Use <kbd className="px-1 py-0.5 bg-blue-800 rounded">🧩</kbd> para classificação complexa</div>
           <div>🤖 Clique em IA para sugestões inteligentes</div>
-          <div>🏷️ Botões rápidos para categorias comuns</div>
           <div>🔗 Reconcilie pagamentos com faturas</div>
-          <div>💡 Busque "PIX", "Posto", etc. e classifique tudo junto</div>
         </div>
       </div>
     </div>

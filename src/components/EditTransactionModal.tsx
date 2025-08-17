@@ -1,4 +1,4 @@
-// components/EditTransactionModal.tsx - VERSÃO LIMPA
+// components/EditTransactionModal.tsx - VERSÃO COMPLETA COM SPLIT PARA CARTÕES
 
 import React, { useState, useEffect } from 'react';
 import { Transaction } from '@/types';
@@ -255,7 +255,7 @@ export function EditTransactionModal({
   );
 }
 
-// ===== COMPONENTE PARA EDITAR CARD TRANSACTIONS =====
+// ===== COMPONENTE PARA EDITAR CARD TRANSACTIONS - ATUALIZADO COM SPLIT =====
 
 import { CardTransaction } from '@/hooks/useCardTransactions';
 
@@ -264,13 +264,15 @@ interface EditCardTransactionModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (transaction: CardTransaction) => void;
+  onSplit?: (transaction: CardTransaction) => void; // ✅ NOVA PROP
 }
 
 export function EditCardTransactionModal({ 
   transaction, 
   isOpen, 
   onClose, 
-  onSave 
+  onSave,
+  onSplit // ✅ NOVA PROP
 }: EditCardTransactionModalProps) {
   const [editForm, setEditForm] = useState<{
     conta: string;
@@ -347,6 +349,7 @@ export function EditCardTransactionModal({
 
   const isReconciled = transaction.status === 'reconciled';
   const canEdit = !isReconciled;
+  const canSplit = canEdit && onSplit; // ✅ NOVA VARIÁVEL
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -520,6 +523,19 @@ export function EditCardTransactionModal({
             >
               {canEdit ? 'Cancelar' : 'Fechar'}
             </button>
+            
+            {/* ✅ NOVO BOTÃO: Dividir para cartões */}
+            {canSplit && (
+              <button
+                onClick={() => {
+                  onSplit(transaction);
+                  onClose();
+                }}
+                className="flex-1 py-2 px-4 bg-purple-600 hover:bg-purple-500 text-white rounded transition-colors"
+              >
+                ✂️ Dividir
+              </button>
+            )}
             
             {canEdit && (
               <button

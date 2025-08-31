@@ -1,22 +1,29 @@
-// types/index.ts - TIPOS UNIFICADOS E COMPATÍVEIS
+// types/index.ts - TIPOS UNIFICADOS E COMPATÍVEIS COM INTER PAG
+import { SUBTIPO_IDS } from '@/lib/constants';
 
 export interface Transaction {
   id: string;
   mes: string;
   data: string;
   descricao_origem: string;
-  subtipo: string;
-  categoria: string;
   descricao: string;
   valor: number;
   origem: string;
   cc: string;
   realizado: 's' | 'p' | 'r'; // ✅ ATUALIZADO: 'r' = reconciliado (não conta no saldo)
-  conta: string;
   is_from_reconciliation?: boolean;
   linked_future_group?: string;
   future_subscription_id?: string;
   reconciliation_metadata?: string;
+  
+  // ✅ NOVO: Apenas subtipo_id - sem campos legados
+  subtipo_id: string; // UUID do subtipo na nova hierarquia
+  
+  // 🚨 DEPRECATED: Campos temporários para compatibilidade durante migração
+  // TODO: Remover após migração completa dos componentes
+  conta?: string;
+  categoria?: string;
+  subtipo?: string;
 }
 
 export interface CardTransaction {
@@ -26,12 +33,66 @@ export interface CardTransaction {
   data_transacao: string;
   descricao_origem: string;
   valor: number;
-  categoria: string | null;
-  subtipo: string | null;
   descricao_classificada: string | null;
   status: 'pending' | 'classified' | 'reconciled';
   origem: string;
   cc: string;
+  
+  // ✅ NOVO: Apenas subtipo_id - sem campos legados
+  subtipo_id: string | null; // UUID do subtipo na nova hierarquia
+  
+  // 🚨 DEPRECATED: Campos temporários para compatibilidade durante migração
+  // TODO: Remover após migração completa dos componentes  
+  categoria?: string;
+  subtipo?: string;
+}
+
+// ✅ NOVOS TIPOS PARA INTER PAG
+export interface InterPagEntry {
+  idTransacao: string;
+  dataHora: string;
+  tipo: string;
+  status: string;
+  parcela: string;
+  bandeira: string;
+  valorBruto: number;
+  valorTaxa: number;
+  valorAntecipacao: number;
+  valorLiquido: number;
+  dataPagamento: string;
+}
+
+export interface InterPagPercentual {
+  idTransacao: string;
+  idContrato: string;
+  percentualCatalogo: number; // 0-100
+  percentualPlanos: number;   // 0-100
+  totalPercentual: number;    // Deve ser 100
+}
+
+export interface InterPagDayGroup {
+  date: string; // YYYY-MM-DD
+  displayDate: string; // DD/MM/YYYY
+  agendaEntries: InterPagEntry[];
+  percentualMatches: Array<{
+    agendaEntry: InterPagEntry;
+    percentualData: InterPagPercentual;
+    splitPreview: {
+      catalogoValue: number;
+      planosValue: number;
+      total: number;
+    };
+  }>;
+  totalValue: number;
+  matchedCount: number;
+  unmatchedCount: number;
+}
+
+export interface InterPagSplitResult {
+  catalogoTransaction: Partial<Transaction>;
+  planosTransaction: Partial<Transaction>;
+  originalTransactionId: string;
+  reconciliationNote: string;
 }
 
 // ✅ TIPO ATUALIZADO COM VISA E MASTERCARD
@@ -46,14 +107,14 @@ export type BankType =
 export interface CategoryData {
   subtipos: string[];
   icon: string;
-  color: string;
 }
 
 export interface Categories {
   [key: string]: CategoryData;
 }
 
-export type ContaType = 'PF' | 'PJ' | 'CONC.';
+// TODO: Remover ContaType - usar hierarquia dinâmica
+// export type ContaType = 'PF' | 'PJ' | 'CONC.';
 
 // ✅ NOVOS TIPOS PARA CLAREZA
 export type RealizadoType = 's' | 'p' | 'r';
@@ -113,6 +174,22 @@ export interface FinancialSummary {
 export interface FinancialSheetData {
   entries: FinancialEntry[];
   summary: FinancialSummary;
+}
+
+// ✅ INTERFACE PARA DADOS INTER PAG
+export interface InterPagSheetData {
+  agendaEntries: InterPagEntry[];
+  percentuais: InterPagPercentual[];
+  summary: {
+    totalEntries: number;
+    totalValue: number;
+    dateRange: {
+      start: string;
+      end: string;
+    };
+    matchedEntries: number;
+    unmatchedEntries: number;
+  };
 }
 
 // ✅ HELPER PARA CONVERTER ENTRE FORMATOS DE RESUMO
@@ -177,6 +254,78 @@ export const createSummaryFromEntries = (entries: FinancialEntry[]): FinancialSu
     },
     byMethod,
     byType
+  };
+};
+
+// ✅ HELPER PARA PROCESSAR DADOS INTER PAG
+export const parseInterPagPercentage = (percentStr: string): number => {
+  if (!percentStr || percentStr.trim() === '') return 0;
+  
+  // Remover aspas e caracteres especiais
+  const cleanStr = percentStr.replace(/["%,]/g, '').trim();
+  const num = parseFloat(cleanStr);
+  
+  return isNaN(num) ? 0 : num;
+};
+
+export const createInterPagSplitTransactions = (
+  originalTransaction: Transaction,
+  agendaEntry: InterPagEntry,
+  percentualData: InterPagPercentual
+): InterPagSplitResult => {
+  const catalogoValue = Math.round((agendaEntry.valorLiquido * percentualData.percentualCatalogo / 100) * 100) / 100;
+  const planosValue = Math.round((agendaEntry.valorLiquido * percentualData.percentualPlanos / 100) * 100) / 100;
+  
+  // Determinar tipo baseado no contrato
+  const isIndividual = percentualData.idContrato.includes('IND');
+  const isColetivo = percentualData.idContrato.includes('COL');
+  
+  const baseProps = {
+    mes: originalTransaction.mes,
+    data: originalTransaction.data,
+    origem: originalTransaction.origem,
+    cc: originalTransaction.cc,
+    // conta: 'PJ' as const, // TODO: Migrar para subtipo_id
+    categoria: 'Receita Antiga', // ✅ INTER PAG = Receita Antiga
+    realizado: 's' as const,
+    is_from_reconciliation: true,
+    linked_future_group: `INTERPAG_${agendaEntry.idTransacao}`,
+    reconciliation_metadata: JSON.stringify({
+      original_transaction_id: originalTransaction.id,
+      agenda_entry_id: agendaEntry.idTransacao,
+      contract_id: percentualData.idContrato,
+      split_type: 'interpag_percentage',
+      split_date: new Date().toISOString(),
+      percentuals: {
+        catalogo: percentualData.percentualCatalogo,
+        planos: percentualData.percentualPlanos
+      }
+    })
+  };
+  
+  const catalogoTransaction: Partial<Transaction> = {
+    ...baseProps,
+    id: `${originalTransaction.id}_CAT`,
+    subtipo_id: isIndividual ? SUBTIPO_IDS.RECEITA_ANTIGA_CATALOGO_INDIVIDUAL : SUBTIPO_IDS.RECEITA_ANTIGA_CATALOGO_COLETIVA,
+    descricao: `Receita Antiga Catálogo ${isIndividual ? 'Individual' : 'Coletivo'} - Contrato ${percentualData.idContrato}`,
+    descricao_origem: `${originalTransaction.descricao_origem} [CATÁLOGO]`,
+    valor: catalogoValue
+  };
+  
+  const planosTransaction: Partial<Transaction> = {
+    ...baseProps,
+    id: `${originalTransaction.id}_PLAN`,
+    subtipo_id: isIndividual ? SUBTIPO_IDS.RECEITA_ANTIGA_PLANO_INDIVIDUAL : SUBTIPO_IDS.RECEITA_ANTIGA_PLANO_COLETIVA,
+    descricao: `Receita Antiga Plano ${isIndividual ? 'Individual' : 'Coletivo'} - Contrato ${percentualData.idContrato}`,
+    descricao_origem: `${originalTransaction.descricao_origem} [PLANOS]`,
+    valor: planosValue
+  };
+  
+  return {
+    catalogoTransaction,
+    planosTransaction,
+    originalTransactionId: originalTransaction.id,
+    reconciliationNote: `Inter Pag split: ${percentualData.percentualCatalogo}% Catálogo / ${percentualData.percentualPlanos}% Planos - Contrato ${percentualData.idContrato}`
   };
 };
 
@@ -266,9 +415,7 @@ export interface ConciliationSession {
 export interface ClassificationTemplate {
   id: string;
   name: string;
-  conta: ContaType;
-  categoria: string;
-  subtipo: string;
+  subtipo_id: string;
   descriptionTemplate: string;
   conditions: {
     amountRange?: [number, number];
@@ -280,48 +427,40 @@ export interface ClassificationTemplate {
 
 export const DEFAULT_CLASSIFICATION_TEMPLATES: ClassificationTemplate[] = [
   {
-    id: 'rec_n_p_ind',
-    name: 'Receita Nova Plano Individual',
-    conta: 'PJ',
-    categoria: 'Receita Nova',
-    subtipo: 'REC. N. P. IND.',
-    descriptionTemplate: 'Receita Nova Plano Individual - {{tipo}} - Contrato {{idContrato}}',
+    id: 'rec_a_p_ind',
+    name: 'Receita Antiga Plano Individual',
+    subtipo_id: SUBTIPO_IDS.RECEITA_ANTIGA_PLANO_INDIVIDUAL,
+    descriptionTemplate: 'Receita Antiga Plano Individual - {{tipo}} - Contrato {{idContrato}}',
     conditions: {
       methods: ['pix', 'cartao'],
       keywords: ['individual', 'plano']
     }
   },
   {
-    id: 'rec_n_p_col',
-    name: 'Receita Nova Plano Coletiva',
-    conta: 'PJ',
-    categoria: 'Receita Nova',
-    subtipo: 'REC. N. P. COL.',
-    descriptionTemplate: 'Receita Nova Plano Coletiva - {{tipo}} - Contrato {{idContrato}}',
+    id: 'rec_a_p_col',
+    name: 'Receita Antiga Plano Coletiva',
+    subtipo_id: SUBTIPO_IDS.RECEITA_ANTIGA_PLANO_COLETIVA,
+    descriptionTemplate: 'Receita Antiga Plano Coletiva - {{tipo}} - Contrato {{idContrato}}',
     conditions: {
       methods: ['pix', 'cartao'],
       keywords: ['coletiva', 'plano']
     }
   },
   {
-    id: 'rec_n_c_ind',
-    name: 'Receita Nova Catálogo Individual',
-    conta: 'PJ',
-    categoria: 'Receita Nova',
-    subtipo: 'REC. N. C. IND.',
-    descriptionTemplate: 'Receita Nova Catálogo Individual - {{tipo}} - Contrato {{idContrato}}',
+    id: 'rec_a_c_ind',
+    name: 'Receita Antiga Catálogo Individual',
+    subtipo_id: SUBTIPO_IDS.RECEITA_ANTIGA_CATALOGO_INDIVIDUAL,
+    descriptionTemplate: 'Receita Antiga Catálogo Individual - {{tipo}} - Contrato {{idContrato}}',
     conditions: {
       methods: ['pix', 'cartao'],
       keywords: ['individual', 'catalogo']
     }
   },
   {
-    id: 'rec_n_c_col',
-    name: 'Receita Nova Catálogo Coletiva',
-    conta: 'PJ',
-    categoria: 'Receita Nova',
-    subtipo: 'REC. N. C. COL.',
-    descriptionTemplate: 'Receita Nova Catálogo Coletiva - {{tipo}} - Contrato {{idContrato}}',
+    id: 'rec_a_c_col',
+    name: 'Receita Antiga Catálogo Coletiva',
+    subtipo_id: SUBTIPO_IDS.RECEITA_ANTIGA_CATALOGO_COLETIVA,
+    descriptionTemplate: 'Receita Antiga Catálogo Coletiva - {{tipo}} - Contrato {{idContrato}}',
     conditions: {
       methods: ['pix', 'cartao'],
       keywords: ['coletiva', 'catalogo']

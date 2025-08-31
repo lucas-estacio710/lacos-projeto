@@ -37,13 +37,44 @@ export const formatMonth = (mes: string): string => {
 
 export const formatDate = (dateStr: string): string => {
   if (!dateStr) return ''
-  if (dateStr.includes('/')) return dateStr
-  if (dateStr.length === 8) {
-    const year = dateStr.substring(0, 4)
+  
+  // Se já está em formato DD/MM/YY ou DD/MM/YYYY, converter para DD/MM/YY
+  if (dateStr.includes('/')) {
+    const parts = dateStr.split('/')
+    if (parts.length === 3) {
+      const day = parts[0]
+      const month = parts[1]
+      let year = parts[2]
+      
+      // Converter YYYY para YY se necessário
+      if (year.length === 4) {
+        year = year.substring(2)
+      }
+      
+      return `${day}/${month}/${year}`
+    }
+    return dateStr
+  }
+  
+  // Se está em formato YYYY-MM-DD
+  if (dateStr.includes('-') && dateStr.length === 10) {
+    const parts = dateStr.split('-')
+    if (parts.length === 3) {
+      const year = parts[0].substring(2) // Pegar apenas os últimos 2 dígitos do ano
+      const month = parts[1]
+      const day = parts[2]
+      return `${day}/${month}/${year}`
+    }
+  }
+  
+  // Se está em formato YYYYMMDD
+  if (dateStr.length === 8 && /^\d{8}$/.test(dateStr)) {
+    const year = dateStr.substring(2, 4) // Pegar apenas os últimos 2 dígitos do ano
     const month = dateStr.substring(4, 6)
     const day = dateStr.substring(6, 8)
     return `${day}/${month}/${year}`
   }
+  
   return dateStr
 }
 

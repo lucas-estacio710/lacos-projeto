@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Transaction } from '@/types';
-import { categoriesPJ, categoriesPF, categoriesCONC } from '@/lib/categories';
+import { useHierarchy } from '@/hooks/useHierarchy';
+import { prepareClassificationOptions } from '@/lib/hierarchyHelpers';
 
 interface SplitPart {
-  categoria: string;
-  subtipo: string;
+  subtipo_id: string;
   descricao: string;
   valor: number;
 }
@@ -17,16 +17,19 @@ interface SplitTransactionModalProps {
 }
 
 export function SplitTransactionModal({ transaction, isOpen, onClose, onSplit }: SplitTransactionModalProps) {
+  const { visaoPlana } = useHierarchy();
   const [numberOfParts, setNumberOfParts] = useState(2);
   const [parts, setParts] = useState<SplitPart[]>([]);
   const [error, setError] = useState<string>('');
+
+  // Prepara opções de classificação
+  const classificationOptions = visaoPlana ? prepareClassificationOptions(visaoPlana) : [];
 
   // Inicializar partes quando o modal abrir
   useEffect(() => {
     if (transaction && isOpen) {
       const initialParts: SplitPart[] = Array.from({ length: numberOfParts }, () => ({
-        categoria: '',
-        subtipo: '',
+        subtipo_id: '',
         descricao: '',
         valor: 0
       }));
@@ -34,42 +37,6 @@ export function SplitTransactionModal({ transaction, isOpen, onClose, onSplit }:
       setError('');
     }
   }, [transaction, isOpen, numberOfParts]);
-
-  // Função para determinar a conta automaticamente (reutilizar lógica existente)
-  const getAccountForTransaction = (transaction: Transaction): string => {
-    // Lógica similar ao que já existe no sistema
-    if (transaction.descricao_origem?.toLowerCase().includes('pix') || 
-        transaction.descricao_origem?.toLowerCase().includes('transferencia')) {
-      return 'PJ';
-    }
-    return 'PF'; // Default
-  };
-
-  // Função para sugerir categoria automaticamente (reutilizar lógica existente)
-  const suggestCategoryForAccount = (account: string, description: string): string => {
-    const categories = getCategoriesForAccount(account);
-    
-    // Lógica simples de sugestão baseada na descrição
-    const descLower = description.toLowerCase();
-    
-    if (descLower.includes('acessorio') || descLower.includes('acessório')) {
-      return Object.keys(categories).find(cat => cat.includes('Operacionais')) || '';
-    }
-    if (descLower.includes('urna')) {
-      return Object.keys(categories).find(cat => cat.includes('Operacionais')) || '';
-    }
-    
-    return '';
-  };
-
-  const getCategoriesForAccount = (account: string) => {
-    switch(account) {
-      case 'PJ': return categoriesPJ;
-      case 'PF': return categoriesPF;
-      case 'CONC.': return categoriesCONC;
-      default: return {};
-    }
-  };
 
   const formatCurrency = (value: number) => {
     return Math.abs(value).toLocaleString('pt-BR', {
@@ -98,9 +65,6 @@ export function SplitTransactionModal({ transaction, isOpen, onClose, onSplit }:
         const lastIndex = parts.length - 1;
         newParts[lastIndex].valor = transaction?.valor && transaction.valor < 0 ? -remaining : remaining;
       }
-    } else if (field === 'categoria') {
-      newParts[index][field] = value as string;
-      newParts[index].subtipo = ''; // Reset subtipo when categoria changes
     } else {
       newParts[index][field] = value as string;
     }
@@ -131,7 +95,7 @@ export function SplitTransactionModal({ transaction, isOpen, onClose, onSplit }:
     }
 
     const hasEmptyFields = parts.some(part => 
-      !part.categoria || !part.subtipo || !part.descricao
+      !part.subtipo_id || !part.descricao
     );
 
     if (hasEmptyFields) {
@@ -144,9 +108,6 @@ export function SplitTransactionModal({ transaction, isOpen, onClose, onSplit }:
   };
 
   if (!isOpen || !transaction) return null;
-
-  const account = getAccountForTransaction(transaction);
-  const categories = getCategoriesForAccount(account);
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -210,33 +171,19 @@ export function SplitTransactionModal({ transaction, isOpen, onClose, onSplit }:
                 </h4>
                 
                 <div className="space-y-3">
-                  {/* Categoria */}
+                  {/* Classificação */}
                   <div>
-                    <label className="text-xs text-gray-400 block mb-1">Categoria *</label>
+                    <label className="text-xs text-gray-400 block mb-1">Classificação *</label>
                     <select
-                      value={part.categoria}
-                      onChange={(e) => handlePartChange(index, 'categoria', e.target.value)}
+                      value={part.subtipo_id}
+                      onChange={(e) => handlePartChange(index, 'subtipo_id', e.target.value)}
                       className="w-full p-2 bg-gray-600 border border-gray-500 rounded text-gray-100 text-sm"
                     >
                       <option value="">Selecione...</option>
-                      {Object.keys(categories).map(cat => (
-                        <option key={cat} value={cat}>{cat}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Subtipo */}
-                  <div>
-                    <label className="text-xs text-gray-400 block mb-1">Subtipo *</label>
-                    <select
-                      value={part.subtipo}
-                      onChange={(e) => handlePartChange(index, 'subtipo', e.target.value)}
-                      className="w-full p-2 bg-gray-600 border border-gray-500 rounded text-gray-100 text-sm"
-                      disabled={!part.categoria}
-                    >
-                      <option value="">Selecione...</option>
-                      {part.categoria && categories[part.categoria]?.subtipos.map(sub => (
-                        <option key={sub} value={sub}>{sub}</option>
+                      {classificationOptions.map(option => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
                       ))}
                     </select>
                   </div>
@@ -313,7 +260,7 @@ export function SplitTransactionModal({ transaction, isOpen, onClose, onSplit }:
             <button
               onClick={handleSplit}
               className="flex-1 py-2 px-4 bg-green-600 hover:bg-green-500 text-white rounded transition-colors"
-              disabled={!!error || parts.some(part => !part.categoria || !part.subtipo || !part.descricao)}
+              disabled={!!error || parts.some(part => !part.subtipo_id || !part.descricao)}
             >
               Dividir Transação
             </button>

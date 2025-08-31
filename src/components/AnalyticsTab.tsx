@@ -1,16 +1,46 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { BarChart } from 'lucide-react';
 import { Transaction } from '@/types';
-import { categoriesPJ, categoriesPF, categoriesCONC } from '@/lib/categories';
+import { useConfig } from '@/contexts/ConfigContext';
+import { useHierarchy } from '@/hooks/useHierarchy';
 
 interface AnalyticsTabProps {
   transactions: Transaction[];
 }
 
 export function AnalyticsTab({ transactions }: AnalyticsTabProps) {
-  const [selectedAccount, setSelectedAccount] = useState('PJ');
+  const { contas, categorias, subtipos, carregarTudo } = useHierarchy();
+  const [selectedAccount, setSelectedAccount] = useState(''); // TODO: Usar primeira conta da hierarquia
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [selectedSubtype, setSelectedSubtype] = useState('all');
+  
+  // Load hierarchy data
+  useEffect(() => {
+    carregarTudo();
+  }, [carregarTudo]);
+  
+  // ✅ Dynamic hierarchy options
+  const availableCategorias = useMemo(() => {
+    const selectedConta = contas.find(c => c.codigo === selectedAccount);
+    if (!selectedConta) return [];
+    
+    return categorias
+      .filter(c => c.conta_id === selectedConta.id && c.ativo)
+      .map(c => ({ nome: c.nome, icone: c.icone }));
+  }, [contas, categorias, selectedAccount]);
+  
+  const availableSubtipos = useMemo(() => {
+    const selectedConta = contas.find(c => c.codigo === selectedAccount);
+    const selectedCategoriaObj = categorias.find(c => 
+      c.conta_id === selectedConta?.id && c.nome === selectedCategory
+    );
+    
+    if (!selectedCategoriaObj) return [];
+    
+    return subtipos
+      .filter(s => s.categoria_id === selectedCategoriaObj.id && s.ativo)
+      .map(s => s.nome);
+  }, [contas, categorias, subtipos, selectedAccount, selectedCategory]);
 
   const formatCurrency = (value: number) => {
     return value.toLocaleString('pt-BR', {
@@ -27,14 +57,6 @@ export function AnalyticsTab({ transactions }: AnalyticsTabProps) {
     return monthNames[parseInt(month) - 1] + ' ' + year;
   };
 
-  const getCategoriesForAccount = (account: string) => {
-    switch(account) {
-      case 'PJ': return categoriesPJ;
-      case 'PF': return categoriesPF;
-      case 'CONC.': return categoriesCONC;
-      default: return {};
-    }
-  };
 
   const getLast6Months = () => {
     const months = [...new Set(transactions.map(t => t.mes))].filter(m => m).sort().reverse().slice(0, 6).reverse();
@@ -82,9 +104,22 @@ export function AnalyticsTab({ transactions }: AnalyticsTabProps) {
               }}
               className="w-full p-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-100"
             >
-              <option value="PJ">PJ - Pessoa Jurídica</option>
-              <option value="PF">PF - Pessoa Física</option>
-              <option value="CONC.">CONC - Conciliação</option>
+              {getAllAccountTypes().map(account => {
+                const customAccount = customAccounts.find(acc => acc.id === account);
+                const accountLabel = customAccount 
+                  ? `${customAccount.icon} ${customAccount.name}`
+                  : account === 'PJ' 
+                    ? '🏢 PJ - Pessoa Jurídica'
+                    : account === 'PF'
+                      ? '👤 PF - Pessoa Física' 
+                      : '🔄 CONC - Conciliação';
+                      
+                return (
+                  <option key={account} value={account}>
+                    {accountLabel}
+                  </option>
+                );
+              })}
             </select>
           </div>
           <div>
@@ -98,8 +133,10 @@ export function AnalyticsTab({ transactions }: AnalyticsTabProps) {
               className="w-full p-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-100"
             >
               <option value="all">Todas as categorias</option>
-              {Object.keys(getCategoriesForAccount(selectedAccount)).map(cat => (
-                <option key={cat} value={cat}>{cat}</option>
+              {availableCategorias.map(categoria => (
+                <option key={categoria.nome} value={categoria.nome}>
+                  {categoria.icone} {categoria.nome}
+                </option>
               ))}
             </select>
           </div>
@@ -113,7 +150,7 @@ export function AnalyticsTab({ transactions }: AnalyticsTabProps) {
             >
               <option value="all">Todos os subtipos</option>
               {selectedCategory !== 'all' && 
-               getCategoriesForAccount(selectedAccount)[selectedCategory]?.subtipos.map(sub => (
+               availableSubtipos.map(sub => (
                 <option key={sub} value={sub}>{sub}</option>
               ))}
             </select>

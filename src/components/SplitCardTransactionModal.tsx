@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { CardTransaction } from '@/hooks/useCardTransactions';
-import { categoriesPJ, categoriesPF, categoriesCONC } from '@/lib/categories';
+import { useConfig } from '@/contexts/ConfigContext';
+import { useHierarchy } from '@/hooks/useHierarchy';
 
 interface SplitCardPart {
   categoria: string;
@@ -24,6 +25,7 @@ export function SplitCardTransactionModal({
   onClose, 
   onSplit 
 }: SplitCardTransactionModalProps) {
+  const { contas, categorias, subtipos } = useHierarchy();
   const [numberOfParts, setNumberOfParts] = useState(2);
   const [parts, setParts] = useState<SplitCardPart[]>([]);
   const [error, setError] = useState<string>('');
@@ -52,14 +54,6 @@ export function SplitCardTransactionModal({
     return 'PF'; // Default
   };
 
-  const getCategoriesForAccount = (account: string) => {
-    switch(account) {
-      case 'PJ': return categoriesPJ;
-      case 'PF': return categoriesPF;
-      case 'CONC.': return categoriesCONC;
-      default: return {};
-    }
-  };
 
   const formatCurrency = (value: number) => {
     return Math.abs(value).toLocaleString('pt-BR', {
@@ -146,7 +140,8 @@ export function SplitCardTransactionModal({
   if (!isOpen || !transaction) return null;
 
   const account = getAccountForTransaction(transaction);
-  const categories = getCategoriesForAccount(account);
+  const contaObj = contas.find(c => c.codigo === account);
+  const categoriasParaConta = contaObj ? categorias.filter(cat => cat.conta_id === contaObj.id) : [];
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -227,8 +222,8 @@ export function SplitCardTransactionModal({
                       className="w-full p-2 bg-gray-600 border border-gray-500 rounded text-gray-100 text-sm"
                     >
                       <option value="">Selecione...</option>
-                      {Object.keys(categories).map(cat => (
-                        <option key={cat} value={cat}>{cat}</option>
+                      {categoriasParaConta.map(cat => (
+                        <option key={cat.id} value={cat.nome}>{cat.nome}</option>
                       ))}
                     </select>
                   </div>
@@ -243,9 +238,14 @@ export function SplitCardTransactionModal({
                       disabled={!part.categoria}
                     >
                       <option value="">Selecione...</option>
-                      {part.categoria && categories[part.categoria]?.subtipos.map(sub => (
-                        <option key={sub} value={sub}>{sub}</option>
-                      ))}
+                      {part.categoria && (() => {
+                        const categoriaObj = categorias.find(c => c.nome === part.categoria);
+                        if (!categoriaObj) return null;
+                        const subtiposParaCategoria = subtipos.filter(sub => sub.categoria_id === categoriaObj.id);
+                        return subtiposParaCategoria.map(sub => (
+                          <option key={sub.id} value={sub.nome}>{sub.nome}</option>
+                        ));
+                      })()}
                     </select>
                   </div>
 

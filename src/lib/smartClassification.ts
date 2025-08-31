@@ -2,15 +2,58 @@
 
 import { Transaction } from '@/types';
 import { CardTransaction } from '@/hooks/useCardTransactions';
-import { categoriesPJ, categoriesPF, categoriesCONC } from '@/lib/categories';
+
+// ✅ TIPOS DA HIERARQUIA
+interface Conta {
+  id: string;
+  codigo: string;
+  nome: string;
+  ordem_exibicao: number;
+}
+
+interface Categoria {
+  id: string;
+  conta_id: string;
+  nome: string;
+  ordem_exibicao: number;
+}
+
+interface Subtipo {
+  id: string;
+  categoria_id: string;
+  nome: string;
+  ordem_exibicao: number;
+}
+
+// ✅ FUNÇÃO HELPER para converter legado para subtipo_id
+export const findSubtipoIdByNames = (
+  contaCodigo: string, 
+  categoriaNome: string, 
+  subtipoNome: string,
+  contas: Conta[],
+  categorias: Categoria[], 
+  subtipos: Subtipo[]
+): string | null => {
+  const conta = contas.find(c => c.codigo === contaCodigo);
+  if (!conta) return null;
+  
+  const categoria = categorias.find(c => c.conta_id === conta.id && c.nome === categoriaNome);
+  if (!categoria) return null;
+  
+  const subtipo = subtipos.find(s => s.categoria_id === categoria.id && s.nome === subtipoNome);
+  return subtipo?.id || null;
+};
 
 /**
  * INTERFACE PARA SUGESTÃO INTELIGENTE
  */
 export interface SmartSuggestion {
-  conta: string;
-  categoria: string;
-  subtipo: string;
+  // ✅ NOVA HIERARQUIA - usar subtipo_id
+  subtipo_id: string;
+  // Legacy fields para compatibilidade
+  conta?: string;
+  categoria?: string;
+  subtipo?: string;
   descricao: string;
   confidence: number; // 0-1
   reason: string;
@@ -18,55 +61,64 @@ export interface SmartSuggestion {
 }
 
 /**
- * CONFIGURAÇÃO DOS BOTÕES DE AÇÃO RÁPIDA
+ * OBTER BOTÕES DE AÇÃO RÁPIDA DINAMICAMENTE
  */
-export const QUICK_ACTION_CATEGORIES = [
-  {
-    id: 'supermercados',
-    label: '🛒',
-    title: 'Supermercados',
-    conta: 'PF',
-    categoria: 'Contas Necessárias',
-    subtipo: 'SUPERMERCADOS',
-    color: 'bg-green-600 hover:bg-green-500'
-  },
-  {
-    id: 'restaurantes',
-    label: '🍽️',
-    title: 'Restaurantes',
-    conta: 'PF',
-    categoria: 'Contas Supérfluas',
-    subtipo: 'RESTAURANTES',
-    color: 'bg-orange-600 hover:bg-orange-500'
-  },
-  {
-    id: 'carro_pessoal',
-    label: '🚗',
-    title: 'Carro Pessoal',
-    conta: 'PF',
-    categoria: 'Contas Necessárias',
-    subtipo: 'CARRO PESSOAL',
-    color: 'bg-blue-600 hover:bg-blue-500'
-  },
-  {
-    id: 'carro_rip',
-    label: '🚚',
-    title: 'Carro RIP',
-    conta: 'PJ',
-    categoria: 'Custos Operacionais',
-    subtipo: 'CARRO RIP',
-    color: 'bg-purple-600 hover:bg-purple-500'
-  },
-  {
-    id: 'entrecontas',
-    label: '🔄',
-    title: 'Entrecontas',
-    conta: 'CONC.',
-    categoria: 'Entrecontas',
-    subtipo: 'ENTRECONTAS',
-    color: 'bg-gray-600 hover:bg-gray-500'
-  }
-] as const;
+export const getQuickActionCategories = (
+  contas: Conta[],
+  categorias: Categoria[],
+  subtipos: Subtipo[]
+) => {
+  return subtipos
+    .filter(subtipo => subtipo.categoria_rapida)
+    .map(subtipo => {
+      const categoria = categorias.find(c => c.id === subtipo.categoria_id);
+      const conta = categoria ? contas.find(c => c.id === categoria.conta_id) : null;
+      
+      // Definir cor baseada no subtipo ou usar padrão
+      let color = 'bg-gray-600 hover:bg-gray-500'; // Padrão
+      
+      if (subtipo.cor_botao) {
+        color = subtipo.cor_botao;
+      } else {
+        // Cores padrão baseadas no código do subtipo
+        switch (subtipo.codigo) {
+          case 'CARRO_PESSOAL':
+            color = 'bg-blue-600 hover:bg-blue-700';
+            break;
+          case 'CARRO_RIP':
+            color = 'bg-red-600 hover:bg-red-700';
+            break;
+          case 'RESTAURANTES':
+            color = 'bg-orange-600 hover:bg-orange-700';
+            break;
+          case 'SUPERMERCADOS':
+            color = 'bg-green-600 hover:bg-green-700';
+            break;
+          case 'FARMACIAS':
+            color = 'bg-purple-600 hover:bg-purple-700';
+            break;
+          case 'ENTRECONTAS':
+            color = 'bg-yellow-600 hover:bg-yellow-700';
+            break;
+          default:
+            color = 'bg-gray-600 hover:bg-gray-500';
+        }
+      }
+      
+      return {
+        id: subtipo.id,
+        label: subtipo.icone || '📁', // Usar ícone da tabela ou padrão
+        title: subtipo.nome,
+        subtipo_id: subtipo.id,
+        conta_codigo: conta?.codigo || '',
+        categoria_nome: categoria?.nome || '',
+        subtipo_nome: subtipo.nome,
+        color: color,
+        ordem_exibicao: subtipo.ordem_exibicao || 999
+      };
+    })
+    .sort((a, b) => a.ordem_exibicao - b.ordem_exibicao); // Ordenar pela ordem_exibicao ao invés de alfabética
+};
 
 /**
  * INTERFACE PARA ITEM DO HISTÓRICO SIMILAR
@@ -75,9 +127,7 @@ export interface HistoricItem {
   id: string;
   type: 'transaction' | 'card';
   descricao_origem: string;
-  conta: string;
-  categoria: string;
-  subtipo: string;
+  subtipo_id: string;
   descricao: string; // Descrição classificada
   similarity: number; // 0-1
   data: string;
@@ -92,47 +142,23 @@ export interface BatchClassificationItem {
   id: string;
   transaction: Transaction | CardTransaction;
   historicSimilar: HistoricItem[];
+  selectedSubtipoId?: string;
+  selectedDescricao?: string;
+  
+  // 🚨 DEPRECATED: Campos temporários para compatibilidade durante migração
+  // TODO: Remover após migração completa do BatchClassificationModal
   selectedConta?: string;
   selectedCategoria?: string;
   selectedSubtipo?: string;
-  selectedDescricao?: string;
 }
 
 /**
  * PALAVRAS-CHAVE PARA CLASSIFICAÇÃO AUTOMÁTICA
+ * TODO: Migrar para usar hierarquia dinâmica
  */
-const KEYWORD_PATTERNS = [
-  // Supermercados
-  {
-    keywords: ['mercado', 'supermercado', 'mart', 'atacadao', 'assai', 'carrefour', 'pao de acucar'],
-    classification: { conta: 'PF', categoria: 'Contas Necessárias', subtipo: 'SUPERMERCADOS' },
-    confidence: 0.9
-  },
-  // Postos de combustível
-  {
-    keywords: ['posto', 'shell', 'petrobras', 'ipiranga', 'br distribuidora', 'combustivel'],
-    classification: { conta: 'PF', categoria: 'Contas Necessárias', subtipo: 'CARRO PESSOAL' },
-    confidence: 0.85
-  },
-  // Restaurantes
-  {
-    keywords: ['restaurante', 'lanchonete', 'pizzaria', 'mcdonald', 'burguer', 'ifood', 'uber eats'],
-    classification: { conta: 'PF', categoria: 'Contas Supérfluas', subtipo: 'RESTAURANTES' },
-    confidence: 0.8
-  },
-  // Farmácias
-  {
-    keywords: ['farmacia', 'drogaria', 'drogasil', 'pacheco', 'raia', 'extrafarma'],
-    classification: { conta: 'PF', categoria: 'Contas Necessárias', subtipo: 'FARMÁCIAS' },
-    confidence: 0.9
-  },
-  // PIX e transferências
-  {
-    keywords: ['pix', 'transferencia', 'ted', 'doc'],
-    classification: { conta: 'CONC.', categoria: 'Entrecontas', subtipo: 'ENTRECONTAS' },
-    confidence: 0.7
-  }
-];
+/* const KEYWORD_PATTERNS = [
+  // Requer migração para estrutura hierárquica dinâmica
+]; */
 
 /**
  * CALCULAR SIMILARIDADE ENTRE DUAS STRINGS
@@ -199,24 +225,8 @@ export const generateSmartSuggestions = (
   
   if (!targetDescription) return [];
   
-  // 1. SUGESTÕES BASEADAS EM PALAVRAS-CHAVE
-  for (const pattern of KEYWORD_PATTERNS) {
-    const matchedKeyword = pattern.keywords.find(keyword => 
-      targetDescription.includes(keyword.toLowerCase())
-    );
-    
-    if (matchedKeyword) {
-      suggestions.push({
-        conta: pattern.classification.conta,
-        categoria: pattern.classification.categoria,
-        subtipo: pattern.classification.subtipo,
-        descricao: transaction.descricao_origem || 'Classificação automática',
-        confidence: pattern.confidence,
-        reason: `Palavra-chave detectada: "${matchedKeyword}"`,
-        sourceType: 'keyword'
-      });
-    }
-  }
+  // 1. SUGESTÕES BASEADAS EM PALAVRAS-CHAVE - DESABILITADO
+  // TODO: Migrar para usar hierarquia dinâmica
   
   // 2. SUGESTÕES BASEADAS NO HISTÓRICO
   const historicSimilar = findSimilarHistoric(transaction, historicTransactions, historicCardTransactions);
@@ -224,9 +234,7 @@ export const generateSmartSuggestions = (
   for (const historic of historicSimilar.slice(0, 3)) { // Top 3 históricos
     if (historic.similarity > 0.6) {
       suggestions.push({
-        conta: historic.conta,
-        categoria: historic.categoria,
-        subtipo: historic.subtipo,
+        subtipo_id: historic.subtipo_id,
         descricao: historic.descricao,
         confidence: historic.similarity,
         reason: `Baseado em transação similar (${Math.round(historic.similarity * 100)}% compatível)`,
@@ -238,34 +246,13 @@ export const generateSmartSuggestions = (
   // 3. SUGESTÕES BASEADAS EM PADRÕES DE VALOR
   const valor = Math.abs(transaction.valor);
   
-  if (valor < 10) {
-    suggestions.push({
-      conta: 'PF',
-      categoria: 'Contas Supérfluas',
-      subtipo: 'OUTROS LAZER',
-      descricao: 'Pequena despesa',
-      confidence: 0.5,
-      reason: 'Valor baixo (< R$ 10) sugere despesa supérflua',
-      sourceType: 'pattern'
-    });
-  } else if (valor > 1000) {
-    suggestions.push({
-      conta: 'PF',
-      categoria: 'Aquisições',
-      subtipo: 'AQUISIÇÕES PESSOAIS',
-      descricao: 'Grande aquisição',
-      confidence: 0.6,
-      reason: 'Valor alto (> R$ 1000) sugere aquisição importante',
-      sourceType: 'pattern'
-    });
-  }
+  // 3. SUGESTÕES BASEADAS EM PADRÕES DE VALOR - DESABILITADO
+  // TODO: Migrar para usar hierarquia dinâmica
   
   // Remover duplicatas e ordenar por confiança
   const uniqueSuggestions = suggestions.filter((suggestion, index, self) => 
     index === self.findIndex(s => 
-      s.conta === suggestion.conta && 
-      s.categoria === suggestion.categoria && 
-      s.subtipo === suggestion.subtipo
+      s.subtipo_id === suggestion.subtipo_id
     )
   );
   
@@ -290,7 +277,7 @@ export const findSimilarHistoric = (
   
   // Processar transações bancárias
   historicTransactions
-    .filter(t => t.realizado === 's' && t.categoria && t.subtipo && t.descricao)
+    .filter(t => t.realizado === 's' && t.subtipo_id && t.descricao)
     .forEach(t => {
       const similarity = calculateSimilarity(targetDescription, t.descricao_origem || '');
       
@@ -299,9 +286,7 @@ export const findSimilarHistoric = (
           id: t.id,
           type: 'transaction',
           descricao_origem: t.descricao_origem || '',
-          conta: t.conta,
-          categoria: t.categoria,
-          subtipo: t.subtipo,
+          subtipo_id: t.subtipo_id || '',
           descricao: t.descricao,
           similarity,
           data: t.data,
@@ -313,23 +298,16 @@ export const findSimilarHistoric = (
   
   // Processar transações de cartão
   historicCardTransactions
-    .filter(c => c.status === 'classified' && c.categoria && c.subtipo && c.descricao_classificada)
+    .filter(c => c.status === 'classified' && c.subtipo_id && c.descricao_classificada)
     .forEach(c => {
       const similarity = calculateSimilarity(targetDescription, c.descricao_origem || '');
       
       if (similarity > 0.3) {
-        // Determinar conta baseada na categoria
-        let conta = 'PF';
-        if (Object.keys(categoriesPJ).includes(c.categoria || '')) conta = 'PJ';
-        else if (Object.keys(categoriesCONC).includes(c.categoria || '')) conta = 'CONC.';
-        
         allHistoric.push({
           id: c.id,
           type: 'card',
           descricao_origem: c.descricao_origem,
-          conta: conta,
-          categoria: c.categoria || '',
-          subtipo: c.subtipo || '',
+          subtipo_id: c.subtipo_id || '',
           descricao: c.descricao_classificada || '',
           similarity,
           data: c.data_transacao,
@@ -346,22 +324,14 @@ export const findSimilarHistoric = (
 };
 
 /**
- * APLICAR CLASSIFICAÇÃO RÁPIDA
+ * APLICAR CLASSIFICAÇÃO RÁPIDA DINAMICAMENTE
  */
 export const applyQuickClassification = (
   transaction: Transaction | CardTransaction,
-  quickCategoryId: string
+  subtipoId: string
 ): any => {
-  const quickCategory = QUICK_ACTION_CATEGORIES.find(c => c.id === quickCategoryId);
-  
-  if (!quickCategory) {
-    throw new Error('Categoria rápida não encontrada');
-  }
-  
   return {
-    conta: quickCategory.conta,
-    categoria: quickCategory.categoria,
-    subtipo: quickCategory.subtipo,
+    subtipo_id: subtipoId,
     descricao: transaction.descricao_origem || 'Sem descrição',
     realizado: 's'
   };
@@ -422,7 +392,7 @@ export const validateBatchClassification = (items: BatchClassificationItem[]): {
 
 // Exportação default
 export default {
-  QUICK_ACTION_CATEGORIES,
+  getQuickActionCategories,
   generateSmartSuggestions,
   findSimilarHistoric,
   applyQuickClassification,

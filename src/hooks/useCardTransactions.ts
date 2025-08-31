@@ -12,8 +12,7 @@ export interface CardTransaction {
   data_transacao: string; // ISO format YYYY-MM-DD
   descricao_origem: string;
   valor: number;
-  categoria?: string | null;
-  subtipo?: string | null;
+  subtipo_id?: string | null;
   descricao_classificada?: string | null;
   status: 'pending' | 'classified' | 'reconciled';
   origem: string; // "Nubank", "Santander", etc
@@ -67,7 +66,8 @@ export function useCardTransactions() {
         return;
       }
 
-      const { data, error: supabaseError } = await supabase
+      // Primeira consulta: carregar card_transactions SEM JOIN
+      const { data: rawCardTransactions, error: supabaseError } = await supabase
         .from('card_transactions')
         .select('*')
         .eq('user_id', user.id)
@@ -75,6 +75,53 @@ export function useCardTransactions() {
 
       if (supabaseError) {
         throw supabaseError;
+      }
+
+      // Segunda consulta: buscar hierarquia para transações com subtipo_id
+      const cardTransactionsWithSubtipo = rawCardTransactions?.filter(t => t.subtipo_id) || [];
+      const subtipoIds = [...new Set(cardTransactionsWithSubtipo.map(t => t.subtipo_id))];
+      
+      let hierarchyMap: Record<string, any> = {};
+      
+      if (subtipoIds.length > 0) {
+        const { data: hierarchyData, error: hierarchyError } = await supabase
+          .from('vw_hierarquia_completa')
+          .select('*')
+          .in('subtipo_id', subtipoIds);
+        
+        if (hierarchyError) {
+          console.warn('Erro ao carregar hierarquia para cartões:', hierarchyError);
+        } else {
+          hierarchyMap = (hierarchyData || []).reduce((acc, item) => {
+            acc[item.subtipo_id] = item;
+            return acc;
+          }, {} as Record<string, any>);
+        }
+      }
+
+      // Combinar dados: adicionar hierarchy a cada transação
+      const data = rawCardTransactions?.map(cardTransaction => ({
+        ...cardTransaction,
+        hierarchy: cardTransaction.subtipo_id ? hierarchyMap[cardTransaction.subtipo_id] : null
+      })) || [];
+
+      console.log('🔍 useCardTransactions - Total loaded:', data.length);
+      console.log('🔍 useCardTransactions - With hierarchy:', data.filter(t => t.hierarchy).length);
+      console.log('🔍 useCardTransactions - CONC card transactions:', data.filter(t => t.hierarchy?.conta_codigo === 'CONC').length);
+
+      // ⭐ DEBUG: Ver status das transações carregadas
+      const statusCount = (data || []).reduce((acc, t) => {
+        acc[t.status] = (acc[t.status] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+      
+      console.log('📊 useCardTransactions - Status carregados do Supabase:', statusCount);
+      console.log('📋 Total de transações carregadas:', data?.length || 0);
+      
+      // Mostrar algumas transações reconciliadas se houver
+      const reconciledSample = (data || []).filter(t => t.status === 'reconciled').slice(0, 3);
+      if (reconciledSample.length > 0) {
+        console.log('📋 Amostra de reconciliadas:', reconciledSample.map(t => `${t.id.slice(-8)} (${t.status})`));
       }
 
       setCardTransactions(data || []);
@@ -94,7 +141,15 @@ export function useCardTransactions() {
 
       const { data, error } = await supabase
         .from('card_transactions')
-        .select('*')
+        .select(`
+          *,
+          hierarchy:vw_hierarquia_completa!subtipo_id (
+            conta_codigo,
+            conta_nome,
+            categoria_nome,
+            subtipo_nome
+          )
+        `)
         .eq('user_id', user.id)
         .eq('fatura_id', faturaId);
 
@@ -321,7 +376,7 @@ export function useCardTransactions() {
       const transactionToUpdate = {
         ...updatedTransaction,
         updated_at: new Date().toISOString(),
-        status: updatedTransaction.categoria && updatedTransaction.subtipo ? 'classified' : 'pending'
+        status: updatedTransaction.subtipo_id ? 'classified' : 'pending'
       };
 
       const { data, error: supabaseError } = await supabase
@@ -347,7 +402,7 @@ export function useCardTransactions() {
 
   // Atualizar múltiplas transações
   const updateMultipleCardTransactions = async (
-    updates: Array<{id: string; categoria: string; subtipo: string; descricao_classificada: string}>
+    updates: Array<{id: string; subtipo_id: string; descricao_classificada: string}>
   ): Promise<number> => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -359,8 +414,7 @@ export function useCardTransactions() {
         const { error } = await supabase
           .from('card_transactions')
           .update({
-            categoria: update.categoria,
-            subtipo: update.subtipo,
+            subtipo_id: update.subtipo_id,
             descricao_classificada: update.descricao_classificada,
             status: 'classified',
             updated_at: new Date().toISOString()
@@ -478,8 +532,66 @@ export function useCardTransactions() {
     }
   };
 
-  // Marcar transações como reconciliadas
+  // ⭐ NOVA FUNÇÃO: Marcar por fatura_id
+  const markFaturaAsReconciled = async (faturaId: string): Promise<number> => {
+    console.log('🔄 markFaturaAsReconciled chamado com fatura_id:', faturaId);
+    
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Usuário não autenticado');
+
+      // Buscar todas as transações da fatura primeiro
+      const { data: faturaTransactions, error: selectError } = await supabase
+        .from('card_transactions')
+        .select('id, status, descricao_origem')
+        .eq('fatura_id', faturaId)
+        .eq('user_id', user.id);
+
+      if (selectError) {
+        console.error('❌ Erro ao buscar transações da fatura:', selectError);
+        throw selectError;
+      }
+
+      if (!faturaTransactions || faturaTransactions.length === 0) {
+        console.warn('⚠️ Nenhuma transação encontrada para fatura_id:', faturaId);
+        return 0;
+      }
+
+      console.log(`📋 Encontradas ${faturaTransactions.length} transações para fatura ${faturaId}:`, 
+        faturaTransactions.map(t => `${t.id} (${t.status})`));
+
+      // Marcar todas como reconciled
+      const { error: updateError, data: updatedData } = await supabase
+        .from('card_transactions')
+        .update({
+          status: 'reconciled',
+          updated_at: new Date().toISOString()
+        })
+        .eq('fatura_id', faturaId)
+        .eq('user_id', user.id)
+        .select('id, status');
+
+      if (updateError) {
+        console.error('❌ Erro ao marcar fatura como reconciled:', updateError);
+        throw updateError;
+      }
+
+      const reconciledCount = updatedData?.length || 0;
+      console.log(`✅ ${reconciledCount} transações da fatura ${faturaId} marcadas como reconciled`);
+      
+      await loadCardTransactions();
+      return reconciledCount;
+
+    } catch (err) {
+      console.error('❌ Erro ao marcar fatura como reconciliada:', err);
+      throw err;
+    }
+  };
+
+  // Marcar transações como reconciliadas (por IDs)
   const markAsReconciled = async (transactionIds: string[]): Promise<number> => {
+    console.log('🔄 markAsReconciled chamado com IDs:', transactionIds);
+    
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Usuário não autenticado');
@@ -487,22 +599,32 @@ export function useCardTransactions() {
       let reconciledCount = 0;
       
       for (const id of transactionIds) {
-        const { error } = await supabase
+        console.log('🔄 Marcando card como reconciled:', id);
+        
+        const { error, data } = await supabase
           .from('card_transactions')
           .update({
             status: 'reconciled',
             updated_at: new Date().toISOString()
           })
           .eq('id', id)
-          .eq('user_id', user.id);
+          .eq('user_id', user.id)
+          .select(); // ⭐ Adicionar select para ver o que foi atualizado
 
-        if (!error) reconciledCount++;
+        if (error) {
+          console.error('❌ Erro ao marcar card como reconciled:', error);
+        } else {
+          console.log('✅ Card marcado como reconciled:', data);
+          reconciledCount++;
+        }
       }
 
+      console.log(`✅ ${reconciledCount}/${transactionIds.length} cards marcados como reconciled`);
+      
       await loadCardTransactions();
       return reconciledCount;
     } catch (err) {
-      console.error('Erro ao marcar como reconciliadas:', err);
+      console.error('❌ Erro ao marcar como reconciliadas:', err);
       throw err;
     }
   };
@@ -577,6 +699,27 @@ export function useCardTransactions() {
     updateMultipleCardTransactions,
     deleteCardTransaction,
     markAsReconciled,
+    markFaturaAsReconciled, // ⭐ NOVA FUNÇÃO
+    
+    // ⭐ FUNÇÃO UTILITÁRIA: Listar faturas disponíveis  
+    listAvailableFaturas: () => {
+      const faturas = [...new Set(cardTransactions.map(t => t.fatura_id))].sort();
+      console.log('📋 Faturas disponíveis:', faturas);
+      return faturas;
+    },
+    
+    // ⭐ FUNÇÃO UTILITÁRIA: Ver status de uma fatura
+    checkFaturaStatus: (faturaId: string) => {
+      const transactions = cardTransactions.filter(t => t.fatura_id === faturaId);
+      const statusCount = transactions.reduce((acc, t) => {
+        acc[t.status] = (acc[t.status] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+      
+      console.log(`📊 Status da fatura ${faturaId}:`, statusCount);
+      console.log(`📋 ${transactions.length} transações:`, transactions.map(t => `${t.id.slice(-8)} (${t.status})`));
+      return { transactions, statusCount };
+    },
     
     // Funções auxiliares
     checkExistingFatura,

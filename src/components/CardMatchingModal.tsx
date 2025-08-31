@@ -305,9 +305,9 @@ export function CardMatchingModal({
             {/* Detalhes */}
             <div className="text-xs text-gray-400">
               {formatDate(match.transaction.data_transacao)} • {match.transaction.origem}
-              {match.transaction.categoria && (
+              {match.transaction.subtipo_id && (
                 <span className="text-blue-400 ml-2">
-                  • {match.transaction.categoria} → {match.transaction.subtipo}
+                  • Classificado
                 </span>
               )}
             </div>

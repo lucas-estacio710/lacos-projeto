@@ -5,6 +5,7 @@ import { Upload } from 'lucide-react';
 import { Transaction, BankType } from '@/types';
 import { CardTransaction } from '@/hooks/useCardTransactions';
 import { formatMonth } from '@/lib/utils';
+import * as XLSX from 'xlsx';
 
 interface BankUploadProps {
   isOpen: boolean;
@@ -46,11 +47,14 @@ export function BankUpload({
 
   // Gerador de ID único DETERMINÍSTICO (para outros bancos)
   const generateUniqueID = (banco: string, data: string, descricao: string, valor: number): string => {
-    const dataFormatada = data.replace(/\D/g, '').slice(-6);
+    const dataFormatada = data.replace(/\D/g, ''); // Usar data completa: DDMMYYYY
     const valorHash = Math.abs(Math.round(valor * 100)).toString(36).slice(-4);
     const descHash = simpleHash(descricao).slice(0, 4);
     
-    return `${banco}${dataFormatada}${descHash}${valorHash}`;
+    const id = `${banco}${dataFormatada}${descHash}${valorHash}`;
+    console.log(`🔧 ID Generation: data='${data}' -> dataFormatada='${dataFormatada}', desc='${descricao}' -> descHash='${descHash}', valor=${valor} -> valorHash='${valorHash}' => ID='${id}'`);
+    
+    return id;
   };
 
   // Converter formato de data brasileiro para ISO
@@ -171,8 +175,7 @@ export function BankUpload({
           data_transacao: dataCompra,
           descricao_origem: titulo,
           valor: valorFinal,
-          categoria: null,
-          subtipo: null,
+          subtipo_id: null,
           descricao_classificada: null,
           status: 'pending',
           origem: cardType,
@@ -239,6 +242,7 @@ export function BankUpload({
       } else if (selectedBank === 'Inter') {
         // ===== PROCESSAR INTER =====
         const importedTransactions: Transaction[] = [];
+        const usedIds = new Set<string>(); // ✅ Verificação local de IDs duplicados
         
         if (lines.length < 7) {
           alert('⚠️ Arquivo deve ter pelo menos 7 linhas (5 para pular + cabeçalho + dados)');
@@ -283,6 +287,14 @@ export function BankUpload({
             const valor = parseValorBR(valorStr);
             
             const id = generateUniqueID('INT', data, descricao_origem, valor);
+            
+            // ✅ Verificar se já existe localmente no arquivo
+            if (usedIds.has(id)) {
+              console.warn(`⚠️ ID duplicado detectado localmente: ${id} para transação: ${descricao_origem}`);
+              continue; // Pular duplicata local
+            }
+            usedIds.add(id);
+            
             const mes = generateMonth(data);
             const dataFormatted = convertDateFormat(data);
             
@@ -291,14 +303,12 @@ export function BankUpload({
               mes,
               data: dataFormatted,
               descricao_origem,
-              subtipo: '',
-              categoria: '',
+              subtipo_id: '',
               descricao: descricao_origem,
               valor,
               origem: 'Inter',
               cc: 'Inter',
               realizado: 'p',
-              conta: ''
             };
             
             importedTransactions.push(transaction);
@@ -387,14 +397,12 @@ export function BankUpload({
               mes,
               data: dataFormatted,
               descricao_origem,
-              subtipo: '',
-              categoria: '',
+              subtipo_id: '',
               descricao: descricao_origem,
               valor,
               origem: 'BB',
               cc: 'BB',
               realizado: 'p',
-              conta: ''
             };
             
             importedTransactions.push(transaction);
@@ -427,7 +435,126 @@ export function BankUpload({
         onClose();
         
       } else if (selectedBank === 'TON') {
-        alert('Por favor, use arquivo Excel (.xlsx) para importar dados da TON');
+        // ===== PROCESSAR TON (EXCEL) =====
+        const importedTransactions: Transaction[] = [];
+        const usedIds = new Set<string>(); // ✅ Verificação local de IDs duplicados
+        
+        try {
+          // Ler arquivo Excel
+          const arrayBuffer = await file.arrayBuffer();
+          const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+          const sheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[sheetName];
+          
+          // Converter para JSON
+          const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+          
+          console.log('📊 TON Excel - Total de linhas:', jsonData.length);
+          console.log('📊 TON Excel - Primeiras 3 linhas:', jsonData.slice(0, 3));
+          console.log('📊 TON Excel - Últimas 3 linhas:', jsonData.slice(-3));
+          
+          // Processar cada linha (assumindo primeira linha é cabeçalho)
+          for (let i = 1; i < jsonData.length; i++) {
+            const row = jsonData[i] as any[];
+            
+            console.log(`🔍 TON Linha ${i}:`, row);
+            
+            if (!row || row.length < 6) {
+              console.log(`❌ TON Linha ${i} - Rejeitada: row=${!!row}, length=${row?.length || 0}`);
+              continue;
+            }
+            
+            // Estrutura TON: [Data, Valor, Tipo, Status, Identificador, Descrição]
+            const dataCell = row[0];     // Coluna 0: Data
+            const valorCell = row[1];    // Coluna 1: Valor  
+            const descricaoCell = row[5]; // Coluna 5: Descrição
+            
+            if (!dataCell || !descricaoCell || valorCell === undefined) {
+              console.log(`❌ TON Linha ${i} - Células obrigatórias vazias: data=${!!dataCell}, desc=${!!descricaoCell}, valor=${valorCell !== undefined}`);
+              continue;
+            }
+            
+            // Converter data TON (formato: "25-08-2025")  
+            let dataStr = String(dataCell).trim();
+            
+            // Converter de DD-MM-YYYY para DD/MM/YYYY
+            if (dataStr.includes('-')) {
+              const [day, month, year] = dataStr.split('-');
+              dataStr = `${day}/${month}/${year}`;
+            }
+            
+            const descricao_origem = String(descricaoCell).trim();
+            const valor = typeof valorCell === 'number' ? valorCell : parseValorBR(String(valorCell));
+            
+            console.log(`🔍 TON Linha ${i} - Processando: data='${dataStr}', desc='${descricao_origem}', valor=${valor}`);
+            
+            // Validações básicas
+            if (!dataStr.match(/^\d{1,2}\/\d{1,2}\/\d{4}$/) || !descricao_origem) {
+              console.log(`❌ TON Linha ${i} - Validação falhou: dataRegex=${dataStr.match(/^\d{1,2}\/\d{1,2}\/\d{4}$/)}, hasDesc=${!!descricao_origem}`);
+              continue;
+            }
+            
+            // Gerar ID determinístico (igual ao exemplo: TON03082025LI3BHI09756501)
+            const id = generateUniqueID('TON', dataStr, descricao_origem, valor);
+            
+            // ✅ Verificar duplicatas locais
+            if (usedIds.has(id)) {
+              console.warn(`⚠️ TON Linha ${i} - ID duplicado detectado localmente: ${id} para transação: ${descricao_origem}`);
+              continue;
+            }
+            usedIds.add(id);
+            
+            const mes = generateMonth(dataStr);
+            const dataFormatted = convertDateFormat(dataStr);
+            
+            const transaction: Transaction = {
+              id,
+              mes,
+              data: dataFormatted,
+              descricao_origem,
+              subtipo_id: '', // ✅ NOVA ESTRUTURA: Vai para não classificadas
+              descricao: descricao_origem,
+              valor,
+              origem: 'Stone', // ✅ No banco TON aparece como Stone
+              cc: 'Stone', // ✅ No banco TON aparece como Stone  
+              realizado: 'p', // ✅ Provisionado (não realizado ainda)
+            };
+            
+            console.log(`✅ TON Linha ${i} - Transação criada: ID=${id}, Data=${dataFormatted}, Valor=${valor}`);
+            importedTransactions.push(transaction);
+          }
+          
+        } catch (excelError) {
+          console.error('Erro ao processar Excel TON:', excelError);
+          throw new Error(`Erro ao ler arquivo Excel: ${(excelError as Error).message}`);
+        }
+        
+        if (importedTransactions.length === 0) {
+          alert(`⚠️ Nenhuma transação válida encontrada no arquivo Excel da TON`);
+          return;
+        }
+
+        console.log(`🎯 TON - ${importedTransactions.length} transações processadas`);
+
+        const result = await onTransactionsImported(importedTransactions);
+        
+        let message = '';
+        if (result?.success && result?.stats) {
+          const { total = 0, added = 0, duplicates = 0 } = result.stats;
+          
+          message = `✅ Importação TON concluída!\n\n`;
+          message += `📊 ${total} transações processadas\n`;
+          message += `➕ ${added} novas transações adicionadas\n`;
+          
+          if (duplicates > 0) {
+            message += `🔄 ${duplicates} duplicatas ignoradas\n`;
+          }
+        } else {
+          message = `✅ ${importedTransactions.length} transações processadas!`;
+        }
+        
+        alert(message);
+        onClose();
       }
       
     } catch (error) {

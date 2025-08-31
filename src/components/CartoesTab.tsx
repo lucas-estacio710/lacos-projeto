@@ -1,18 +1,103 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { CardTransaction } from '@/hooks/useCardTransactions';
 import { formatCurrency, formatMonth, formatDate } from '@/lib/utils';
-import { getCategoriesForAccount } from '@/lib/categories';
+import { useConfig } from '@/contexts/ConfigContext';
+import { useHierarchy } from '@/hooks/useHierarchy';
 
 interface CartoesTabProps {
   cardTransactions: CardTransaction[];
   onEditCardTransaction: (transaction: CardTransaction) => void;
 }
 
+type StatusFilter = 'aberto' | 'fechado' | 'todos';
+
 export function CartoesTab({ 
   cardTransactions, 
   onEditCardTransaction
 }: CartoesTabProps) {
+  const { contas, categorias, subtipos, carregarTudo } = useHierarchy();
+  
+  // Load hierarchy data
+  useEffect(() => {
+    carregarTudo();
+  }, [carregarTudo]);
+
+  // ✅ Helper functions para acessar dados da hierarquia - IGUAL AO OVERVIEWTAB
+  const getCardTransactionAccount = (transaction: CardTransaction): string => {
+    // PRIMEIRO: tenta hierarchy
+    if (transaction.hierarchy?.conta_codigo) {
+      return transaction.hierarchy.conta_codigo;
+    }
+    
+    // SEGUNDO: tenta buscar via subtipo_id manualmente
+    if (transaction.subtipo_id) {
+      const subtipo = subtipos.find(s => s.id === transaction.subtipo_id);
+      if (subtipo) {
+        const categoria = categorias.find(c => c.id === subtipo.categoria_id);
+        if (categoria) {
+          const conta = contas.find(c => c.id === categoria.conta_id);
+          if (conta) {
+            return conta.codigo;
+          }
+        }
+      }
+    }
+    
+    // TERCEIRO: FORÇA mostrar como OUTRAS
+    return 'OUTRAS';
+  };
+
+  const getCardTransactionCategory = (transaction: CardTransaction): string => {
+    // PRIMEIRO: tenta hierarchy
+    if (transaction.hierarchy?.categoria_nome) {
+      return transaction.hierarchy.categoria_nome;
+    }
+    
+    // SEGUNDO: busca manual via subtipo_id
+    if (transaction.subtipo_id) {
+      const subtipo = subtipos.find(s => s.id === transaction.subtipo_id);
+      if (subtipo) {
+        const categoria = categorias.find(c => c.id === subtipo.categoria_id);
+        if (categoria) {
+          return categoria.nome;
+        }
+      }
+    }
+    
+    // TERCEIRO: usa campo legacy ou fallback
+    return transaction.categoria || 'SEM CATEGORIA';
+  };
+
+  const getCardTransactionSubtype = (transaction: CardTransaction): string => {
+    // PRIMEIRO: tenta hierarchy
+    if (transaction.hierarchy?.subtipo_nome) {
+      return transaction.hierarchy.subtipo_nome;
+    }
+    
+    // SEGUNDO: busca manual via subtipo_id
+    if (transaction.subtipo_id) {
+      const subtipo = subtipos.find(s => s.id === transaction.subtipo_id);
+      if (subtipo) {
+        return subtipo.nome;
+      }
+    }
+    
+    // TERCEIRO: usa campo legacy ou fallback
+    return transaction.subtipo || 'SEM SUBTIPO';
+  };
+  
+  // ✅ Helper to get category icon from hierarchy
+  const getCategoryIcon = useMemo(() => {
+    return (contaCodigo: string, categoriaNome: string) => {
+      const conta = contas.find(c => c.codigo === contaCodigo);
+      const categoria = categorias.find(c => 
+        c.conta_id === conta?.id && c.nome === categoriaNome
+      );
+      return categoria?.icone || '📁';
+    };
+  }, [contas, categorias]);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('todos'); // ⭐ FORÇA MOSTRAR TUDO
   const [selectedCartao, setSelectedCartao] = useState('todos');
   const [selectedMes, setSelectedMes] = useState('todos');
   const [searchTerm, setSearchTerm] = useState('');
@@ -44,8 +129,26 @@ export function CartoesTab({
     return parts[1] || '';
   }))].filter(m => m).sort().reverse();
 
+  // ⭐ DEBUG: Ver status das transações
+  console.log('📊 Status das transações carregadas:', 
+    cardTransactions.reduce((acc, t) => {
+      acc[t.status] = (acc[t.status] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>)
+  );
+  console.log('🔍 Filtro atual:', statusFilter);
+
   // Filtrar transações
   const filteredTransactions = cardTransactions.filter(t => {
+    // ⭐ FILTRO DE STATUS (fluxo: pending → classified → reconciled)
+    let matchesStatus = true;
+    if (statusFilter === 'aberto') {
+      matchesStatus = t.status === 'classified'; // Somente Classified (aguardando reconciliação)
+    } else if (statusFilter === 'fechado') {
+      matchesStatus = t.status === 'reconciled'; // Somente Reconciled (finalizados)
+    }
+    // Para 'todos', não filtra por status (pending + classified + reconciled)
+    
     const matchesCartao = selectedCartao === 'todos' || t.origem === selectedCartao;
     
     // Extrair mês da fatura_id para comparação
@@ -58,33 +161,108 @@ export function CartoesTab({
       t.categoria?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       t.subtipo?.toLowerCase().includes(searchTerm.toLowerCase());
     
-    return matchesCartao && matchesMes && matchesSearch;
+    return matchesStatus && matchesCartao && matchesMes && matchesSearch;
   });
 
-  // Agrupar por categoria (apenas as classificadas)
-  const transacoesClassificadas = filteredTransactions.filter(t => t.status === 'classified');
+  // Agrupar por categoria (classificadas E reconciliadas)
+  const transacoesClassificadas = filteredTransactions.filter(t => t.status === 'classified' || t.status === 'reconciled');
+  
+  // DEBUG LOGS - FORÇA MOSTRAR TUDO
+  console.log('🔍 CartoesTab - Total cardTransactions:', cardTransactions.length);
+  console.log('🔍 CartoesTab - filteredTransactions:', filteredTransactions.length);
+  console.log('🔍 CartoesTab - transacoesClassificadas:', transacoesClassificadas.length);
+  console.log('🔍 CartoesTab - Status breakdown:', 
+    cardTransactions.reduce((acc, t) => {
+      acc[t.status] = (acc[t.status] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>)
+  );
+  console.log('🔍 CartoesTab - Sample classified:', transacoesClassificadas.slice(0, 2));
+  console.log('🔍 CartoesTab - Current filter:', statusFilter);
+  console.log('🔍 CartoesTab - Contas encontradas:', [...new Set(transacoesClassificadas.map(t => getCardTransactionAccount(t)))]);
+  console.log('🔍 CartoesTab - Sample transaction full:', transacoesClassificadas[0]);
+  console.log('🔍 CartoesTab - Transactions with hierarchy:', transacoesClassificadas.filter(t => t.hierarchy).length);
+  console.log('🔍 CartoesTab - Sample account resolution:', transacoesClassificadas.slice(0, 3).map(t => ({
+    id: t.id.slice(-8),
+    subtipo_id: t.subtipo_id?.slice(-8),
+    account: getCardTransactionAccount(t),
+    category: getCardTransactionCategory(t),
+    subtype: getCardTransactionSubtype(t)
+  })));
 
-  // ✅ CÁLCULOS CORRIGIDOS: Somar com sinais e depois aplicar Math.abs
+  // ✅ CÁLCULOS DINÂMICOS: baseados nos filtros aplicados
   const totalGeral = Math.abs(filteredTransactions.reduce((sum, t) => sum + t.valor, 0));
   const totalClassificado = Math.abs(transacoesClassificadas.reduce((sum, t) => sum + t.valor, 0));
   const totalNaoClassificado = Math.abs(filteredTransactions
     .filter(t => t.status !== 'classified')
     .reduce((sum, t) => sum + t.valor, 0));
 
+  // ⭐ TOTAL DINÂMICO: Usar o totalGeral que já considera todos os filtros
+  const totalDinamico = totalGeral;
+
+  // ⭐ TÍTULO DINÂMICO: Baseado nos filtros selecionados
+  const getTituloDinamico = () => {
+    let partes = ["💳 Total"];
+    
+    // Adicionar cartão se não for "todos"
+    if (selectedCartao !== 'todos') {
+      partes.push(selectedCartao);
+    }
+    
+    // Adicionar mês se não for "todos"
+    if (selectedMes !== 'todos') {
+      partes.push(formatMonth(selectedMes));
+    }
+    
+    // Se ambos forem "todos", usar "Cartões"
+    if (selectedCartao === 'todos' && selectedMes === 'todos') {
+      return "💳 Total Cartões";
+    }
+    
+    return partes.join(" ");
+  };
+
   return (
     <div className="space-y-4">
-      {/* Header com resumo */}
-      <div className="bg-gradient-to-r from-purple-600 to-pink-600 text-white p-4 rounded-lg shadow-lg">
-        <h2 className="text-lg font-bold mb-2">💳 Cartões de Crédito</h2>
-        <div className="grid grid-cols-2 gap-4 text-sm">
-          <div>
-            <p className="opacity-90">Total das Faturas</p>
-            <p className="text-xl font-bold">R$ {formatCurrency(totalGeral)}</p>
-          </div>
-          <div>
-            <p className="opacity-90">Transações</p>
-            <p className="text-xl font-bold">{filteredTransactions.length}</p>
-          </div>
+
+      {/* ⭐ TOGGLES DE STATUS - ACIMA DOS FILTROS */}
+      <div className="bg-gray-800 p-4 rounded-lg shadow-lg border border-gray-700">
+        <div className="flex items-center justify-center gap-1 sm:gap-2">
+          <button
+            onClick={() => setStatusFilter('aberto')}
+            className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+              statusFilter === 'aberto'
+                ? 'bg-yellow-600 text-white shadow-lg animate-pulse'
+                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            }`}
+          >
+            <span className="hidden sm:inline">🟡 Aberto</span>
+            <span className="sm:hidden">🟡 Aberto</span>
+          </button>
+          
+          <button
+            onClick={() => setStatusFilter('fechado')}
+            className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+              statusFilter === 'fechado'
+                ? 'bg-green-600 text-white shadow-lg'
+                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            }`}
+          >
+            <span className="hidden sm:inline">✅ Fechado</span>
+            <span className="sm:hidden">✅ Fech.</span>
+          </button>
+          
+          <button
+            onClick={() => setStatusFilter('todos')}
+            className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+              statusFilter === 'todos'
+                ? 'bg-purple-600 text-white shadow-lg'
+                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            }`}
+          >
+            <span className="hidden sm:inline">🔍 Todos</span>
+            <span className="sm:hidden">🔍 Todos</span>
+          </button>
         </div>
       </div>
 
@@ -133,45 +311,77 @@ export function CartoesTab({
         </div>
       </div>
 
-      {/* Resumo de totais */}
-      <div className="grid grid-cols-2 gap-2">
-        <div className="bg-green-800 p-3 rounded-lg text-center border border-green-700">
-          <p className="text-green-100 text-xs">Classificado</p>
-          <p className="text-green-100 font-bold">R$ {formatCurrency(totalClassificado)}</p>
-          <p className="text-green-300 text-xs">{transacoesClassificadas.length} itens</p>
+      {/* Total Dinâmico */}
+      {totalDinamico > 0 && (
+        <div className="bg-gradient-to-r from-blue-600 to-purple-600 p-4 rounded-lg">
+          {/* Linha 1: Título e Valor */}
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-sm font-medium text-transparent bg-clip-text bg-gradient-to-r from-blue-200 via-purple-200 to-pink-200">
+              {getTituloDinamico()}
+            </h2>
+            <p className="text-xl font-bold text-white">
+              R$ {formatCurrency(totalDinamico)}
+            </p>
+          </div>
+          
+          {/* Linha 2: Despesas */}
+          <div className="flex items-center justify-between text-sm mb-1">
+            <span className="text-red-200">Despesas</span>
+            <span className="text-red-200 font-medium">
+              R$ {formatCurrency(Math.abs(filteredTransactions.filter(t => t.valor < 0).reduce((sum, t) => sum + t.valor, 0)))}
+            </span>
+          </div>
+          
+          {/* Linha 3: Estornos */}
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-green-200">Estornos</span>
+            <span className="text-green-200 font-medium">
+              R$ {formatCurrency(filteredTransactions.filter(t => t.valor > 0).reduce((sum, t) => sum + t.valor, 0))}
+            </span>
+          </div>
+          
+          {/* Contador de transações (pequeno, discreto) */}
+          <p className="text-xs text-blue-200 mt-2 text-center opacity-75">
+            {filteredTransactions.length} transações
+          </p>
         </div>
-        <div className="bg-purple-800 p-3 rounded-lg text-center border border-purple-700">
-          <p className="text-purple-100 text-xs">Total Geral</p>
-          <p className="text-purple-100 font-bold">R$ {formatCurrency(totalGeral)}</p>
-          <p className="text-purple-300 text-xs">{filteredTransactions.length} itens</p>
-        </div>
-      </div>
+      )}
 
-      {/* Sistema hierárquico por conta */}
-      {(['PJ', 'PF', 'CONC.'] as const).map(conta => {
-        const transacoesConta = transacoesClassificadas.filter(t => {
-          if (!t.categoria) return false;
-          const categories = getCategoriesForAccount(conta);
-          return Object.keys(categories).includes(t.categoria);
-        });
+      {/* USANDO HELPER FUNCTIONS - Sistema hierárquico por conta ORDENADO */}
+      {[...new Set(transacoesClassificadas.map(t => getCardTransactionAccount(t)))]
+        .sort((a, b) => {
+          // Ordenação usando ordem_exibicao das contas
+          const getContaOrdem = (codConta: string) => {
+            const conta = contas.find(c => c.codigo === codConta);
+            if (conta) {
+              return conta.ordem_exibicao;
+            }
+            return codConta === 'OUTRAS' ? 1000 : 999;
+          };
+          return getContaOrdem(a) - getContaOrdem(b);
+        })
+        .map(conta => {
+        // Filtrar transações desta conta específica
+        const transacoesConta = transacoesClassificadas.filter(t => getCardTransactionAccount(t) === conta);
 
         if (transacoesConta.length === 0) return null;
 
         // ✅ CORREÇÃO: Calcular total da conta respeitando sinais
         const totalConta = Math.abs(transacoesConta.reduce((sum, t) => sum + t.valor, 0));
         
-        const contaLabels: Record<string, { title: string; icon: string; color: string }> = {
-          'PJ': { title: 'Gastos PJ', icon: '🏢', color: 'blue' },
-          'PF': { title: 'Gastos PF', icon: '👤', color: 'green' },
-          'CONC.': { title: 'Gastos CONC.', icon: '🔄', color: 'purple' }
-        };
+        // ⭐ CORREÇÃO: Total geral deve ser baseado nas transações filtradas, não classificadas
+        const totalGeralFiltrado = Math.abs(filteredTransactions.reduce((sum, t) => sum + t.valor, 0));
+        
+        // Usar dados REAIS da hierarquia ou fallback
+        const contaObj = contas.find(c => c.codigo === conta);
+        const label = contaObj
+          ? { title: `Cartões ${contaObj.nome}`, icon: contaObj.icone || '💳', color: 'blue' }
+          : { title: `Cartões ${conta}`, icon: '💳', color: 'gray' };
 
-        const label = contaLabels[conta] || contaLabels['PF'];
-
-        // Agrupar hierarquicamente por categoria > subtipo
+        // Agrupar hierarquicamente por categoria > subtipo USANDO HELPER FUNCTIONS
         const groupedHierarchyConta = transacoesConta.reduce((acc, transaction) => {
-          const categoria = transaction.categoria || 'Sem categoria';
-          const subtipo = transaction.subtipo || 'Sem subtipo';
+          const categoria = getCardTransactionCategory(transaction);
+          const subtipo = getCardTransactionSubtype(transaction);
           
           if (!acc[categoria]) {
             acc[categoria] = {};
@@ -187,9 +397,10 @@ export function CartoesTab({
           <div key={conta} className="space-y-3">
             {/* Header da Conta */}
             <div className={`bg-gradient-to-r ${
-              conta === 'PJ' ? 'from-blue-600 to-blue-700' :
-              conta === 'PF' ? 'from-green-600 to-green-700' :
-              'from-purple-600 to-purple-700'
+              label.color === 'blue' ? 'from-blue-600 to-blue-700' :
+              label.color === 'green' ? 'from-green-600 to-green-700' :
+              label.color === 'purple' ? 'from-purple-600 to-purple-700' :
+              'from-gray-600 to-gray-700'
             } text-white p-4 rounded-lg shadow-lg`}>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -202,7 +413,7 @@ export function CartoesTab({
                 <div className="text-right">
                   <p className="text-xl font-bold">R$ {formatCurrency(totalConta)}</p>
                   <p className="text-sm opacity-90">
-                    {totalClassificado > 0 ? ((totalConta / totalClassificado) * 100).toFixed(1) : 0}% do total
+                    {totalGeralFiltrado > 0 ? ((totalConta / totalGeralFiltrado) * 100).toFixed(1) : 0}% do total
                   </p>
                 </div>
               </div>
@@ -222,15 +433,12 @@ export function CartoesTab({
                 const totalCategoria = Math.abs(categoriaTransactions.reduce((sum, t) => sum + t.valor, 0));
                 const countCategoria = categoriaTransactions.length;
                 
-                // Buscar ícone da categoria
-                let categoryIcon = '📊';
+                // ✅ Buscar ícone da categoria usando sistema dinâmico
+                let categoryIcon = getCategoryIcon(conta, categoria) || '📊';
                 let categoryColor = 'red';
                 
-                const categories = getCategoriesForAccount(conta);
-                if (categories[categoria]) {
-                  categoryIcon = categories[categoria].icon;
-                  categoryColor = categories[categoria].color;
-                }
+                // Fallback para sistema antigo se necessário
+                
 
                 const isExpanded = expandedCategories[`${conta}-${categoria}`];
 
@@ -250,8 +458,8 @@ export function CartoesTab({
                       </div>
                       <div className="flex items-center gap-2">
                         <div className="text-right">
-                          <p className={`font-bold text-sm ${categoryColor === 'green' ? 'text-green-400' : 'text-red-400'}`}>
-                            R$ {formatCurrency(totalCategoria)}
+                          <p className={`font-bold text-sm ${categoriaTransactions.reduce((sum, t) => sum + t.valor, 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {categoriaTransactions.reduce((sum, t) => sum + t.valor, 0) >= 0 ? '+' : ''}R$ {formatCurrency(totalCategoria)}
                           </p>
                           <p className="text-xs text-gray-400">
                             {totalConta > 0 ? ((totalCategoria / totalConta) * 100).toFixed(1) : 0}% da conta
@@ -296,8 +504,8 @@ export function CartoesTab({
                                   </div>
                                   <div className="flex items-center gap-2">
                                     <div className="text-right">
-                                      <p className="font-semibold text-red-400 text-sm">
-                                        R$ {formatCurrency(totalSubtipo)}
+                                      <p className={`font-semibold text-sm ${transactions.reduce((sum, t) => sum + t.valor, 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                        {transactions.reduce((sum, t) => sum + t.valor, 0) >= 0 ? '+' : ''}R$ {formatCurrency(totalSubtipo)}
                                       </p>
                                       <p className="text-xs text-gray-500">
                                         {totalCategoria > 0 ? ((totalSubtipo / totalCategoria) * 100).toFixed(1) : 0}%
@@ -309,11 +517,11 @@ export function CartoesTab({
 
                                 {/* Transações */}
                                 {isSubtypeExpanded && (
-                                  <div className="bg-gradient-to-r from-gray-750 to-gray-700">
+                                  <div className="bg-gradient-to-r from-slate-800 to-blue-900">
                                     {transactions.map((transaction, idx) => (
                                       <div 
                                         key={`${transaction.id}-${idx}`} 
-                                        className="px-6 py-2 border-b border-gray-600 last:border-b-0 hover:bg-gray-700"
+                                        className="px-6 py-2 border-b border-blue-800 last:border-b-0 hover:bg-blue-800"
                                       >
                                         <div className="flex items-center justify-between">
                                           <div className="flex-1 min-w-0">
@@ -365,42 +573,6 @@ export function CartoesTab({
         );
       })}
 
-      {/* Total Geral */}
-      {totalClassificado > 0 && (
-        <div className="relative overflow-hidden rounded-xl">
-          <div className="absolute inset-0 bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 opacity-95"></div>
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(120,119,198,0.1),transparent)] opacity-50"></div>
-          
-          <div className="relative p-6 text-center">
-            <div className="inline-flex items-center justify-center w-16 h-16 mb-4 rounded-full bg-gradient-to-r from-blue-500 to-purple-600 shadow-lg">
-              <span className="text-3xl filter drop-shadow-lg">💳</span>
-            </div>
-            
-            <h2 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 mb-2">
-              Total Geral Cartões
-            </h2>
-            
-            <div className="relative">
-              <p className="text-4xl font-bold text-white mb-1 filter drop-shadow-lg">
-                R$ {formatCurrency(totalClassificado)}
-              </p>
-            </div>
-            
-            <div className="grid grid-cols-2 gap-4 mt-4 pt-4 border-t border-gray-700">
-              <div className="text-center">
-                <p className="text-gray-400 text-sm">Transações</p>
-                <p className="text-lg font-semibold text-blue-300">{transacoesClassificadas.length}</p>
-              </div>
-              <div className="text-center">
-                <p className="text-gray-400 text-sm">Categorias</p>
-                <p className="text-lg font-semibold text-purple-300">
-                  {[...new Set(transacoesClassificadas.map(t => t.categoria))].filter(Boolean).length}
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Mensagem quando não há transações */}
       {filteredTransactions.length === 0 && (

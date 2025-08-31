@@ -53,7 +53,6 @@ export const parseToISODate = (dateStr: string): string | null => {
   const cleanStr = dateStr.trim();
   const format = detectDateFormat(cleanStr);
   
-  console.log(`🔍 parseToISODate: "${cleanStr}" -> formato detectado: ${format}`);
   
   try {
     switch (format) {
@@ -114,7 +113,6 @@ export const parseToISODate = (dateStr: string): string | null => {
  */
 export const formatDateToLocal = (dateInput: string | Date): string => {
   try {
-    console.log('📄 formatDateToLocal input:', dateInput);
     
     if (!dateInput || dateInput === '' || dateInput === 'undefined') {
       console.warn('⚠️ Data inválida recebida:', dateInput);
@@ -127,19 +125,17 @@ export const formatDateToLocal = (dateInput: string | Date): string => {
     if (typeof dateInput === 'string') {
       // Se já está no formato YYYY-MM-DD, retorna direto
       if (/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
-        console.log('✅ Data já está no formato correto:', dateInput);
+        // ✅ Data já está no formato correto
         return dateInput;
       }
       
       // Tentar parsing inteligente primeiro
       const parsedDate = parseToISODate(dateInput);
       if (parsedDate) {
-        console.log('✅ Data parseada com sucesso:', parsedDate);
         return parsedDate;
       }
       
       // Fallback: tentar Date constructor
-      console.log('🔄 Tentando fallback com Date constructor...');
       if (dateInput.includes('T') || dateInput.includes(' ')) {
         date = new Date(dateInput);
       } else {
@@ -163,7 +159,6 @@ export const formatDateToLocal = (dateInput: string | Date): string => {
 
     // Verificar se a data é válida
     if (isNaN(date.getTime())) {
-      console.warn('⚠️ Data inválida após conversão:', dateInput);
       return 'Data inválida';
     }
 
@@ -173,11 +168,9 @@ export const formatDateToLocal = (dateInput: string | Date): string => {
     const day = String(date.getDate()).padStart(2, '0');
     
     const result = `${year}-${month}-${day}`;
-    console.log('✅ formatDateToLocal result:', result);
     
     return result;
   } catch (error) {
-    console.error('❌ Erro em formatDateToLocal:', error);
     return 'Data inválida';
   }
 };
@@ -196,7 +189,6 @@ export const formatDateForDisplay = (dateInput: string | Date): string => {
     const [year, month, day] = dateStr.split('-');
     return `${day}/${month}/${year}`;
   } catch (error) {
-    console.error('❌ Erro em formatDateForDisplay:', error);
     return 'Data inválida';
   }
 };
@@ -214,7 +206,7 @@ export const isSameDay = (date1: string | Date, date2: string | Date): boolean =
     
     return result;
   } catch (error) {
-    console.error('❌ Erro em isSameDay:', error);
+
     return false;
   }
 };
@@ -243,16 +235,13 @@ export const extractTransactionDate = (transaction: any): string => {
     }
     
     if (!dateStr || dateStr === '' || dateStr === 'undefined') {
-      console.warn('⚠️ Nenhuma data válida encontrada na transação:', transaction.id);
       return '';
     }
     
     const result = formatDateToLocal(dateStr);
-    console.log('✅ extractTransactionDate result:', result);
     
     return result === 'Data inválida' ? '' : result;
   } catch (error) {
-    console.error('❌ Erro em extractTransactionDate:', error);
     return '';
   }
 };
@@ -270,14 +259,12 @@ export const extractSheetEntryDate = (entry: any): string => {
     });
     
     if (!entry.dataHora || entry.dataHora === '' || entry.dataHora === 'undefined') {
-      console.warn('⚠️ Nenhuma data válida encontrada na entrada:', entry.id);
       return '';
     }
     
     // Primeiro, tentar detectar e converter usando parsing inteligente
     const parsedDate = parseToISODate(entry.dataHora);
     if (parsedDate) {
-      console.log('✅ extractSheetEntryDate - parsing inteligente:', parsedDate);
       return parsedDate;
     }
     

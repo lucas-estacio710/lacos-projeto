@@ -1,18 +1,10 @@
-// hooks/useTransactions.ts - VERSÃO CORRIGIDA COM TIPAGEM
+// hooks/useTransactions.ts - VERSÃO CORRIGIDA COM TIPAGEM E SUPORTE INTER PAG
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Transaction, countsInBalance, isExecuted } from '@/types';
+import { Transaction, countsInBalance, isExecuted, InterPagSplitResult } from '@/types';
 import { CardTransaction } from './useCardTransactions';
-import { categoriesPJ, categoriesPF, categoriesCONC } from '@/lib/categories';
-
-// ===== FUNÇÃO HELPER: Determinar conta baseada na categoria =====
-const getContaFromCategoria = (categoria: string): string => {
-  if (Object.keys(categoriesPJ).includes(categoria)) return 'PJ';
-  if (Object.keys(categoriesPF).includes(categoria)) return 'PF';
-  if (Object.keys(categoriesCONC).includes(categoria)) return 'CONC.';
-  return 'PF';
-};
+// Função legacy removida - usar apenas subtipo_id
 
 export function useTransactions() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -31,7 +23,8 @@ export function useTransactions() {
         return;
       }
 
-      const { data, error: supabaseError } = await supabase
+      // Primeira tentativa: carregar transações SEM JOIN
+      const { data: rawTransactions, error: supabaseError } = await supabase
         .from('transactions')
         .select('*')
         .eq('user_id', user.id)
@@ -41,7 +34,39 @@ export function useTransactions() {
         throw supabaseError;
       }
 
-      setTransactions(data || []);
+      // Segunda consulta: buscar hierarquia para todas as transações que têm subtipo_id
+      const transactionsWithSubtipo = rawTransactions?.filter(t => t.subtipo_id) || [];
+      const subtipoIds = [...new Set(transactionsWithSubtipo.map(t => t.subtipo_id))];
+      
+      let hierarchyMap: Record<string, any> = {};
+      
+      if (subtipoIds.length > 0) {
+        const { data: hierarchyData, error: hierarchyError } = await supabase
+          .from('vw_hierarquia_completa')
+          .select('*')
+          .in('subtipo_id', subtipoIds);
+        
+        if (hierarchyError) {
+          console.warn('Erro ao carregar hierarquia:', hierarchyError);
+        } else {
+          hierarchyMap = (hierarchyData || []).reduce((acc, item) => {
+            acc[item.subtipo_id] = item;
+            return acc;
+          }, {} as Record<string, any>);
+        }
+      }
+
+      // Combinar dados: adicionar hierarchy a cada transação
+      const data = rawTransactions?.map(transaction => ({
+        ...transaction,
+        hierarchy: transaction.subtipo_id ? hierarchyMap[transaction.subtipo_id] : null
+      })) || [];
+
+      // console.log('🔍 loadTransactions - Total loaded:', data.length);
+      // console.log('🔍 loadTransactions - With hierarchy:', data.filter(t => t.hierarchy).length);
+      // console.log('🔍 loadTransactions - CONC transactions:', data.filter(t => t.hierarchy?.conta_codigo === 'CONC').length);
+
+      setTransactions(data);
     } catch (err) {
       console.error('Erro ao carregar transações:', err);
       setError(err instanceof Error ? err.message : 'Erro desconhecido');
@@ -50,128 +75,172 @@ export function useTransactions() {
     }
   };
 
-  // Adicionar múltiplas transações
-  const addTransactions = async (newTransactions: Transaction[]) => {
-    try {
-      console.log('📄 Iniciando addTransactions com:', newTransactions.length, 'transações');
-      
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) {
-        throw new Error('Usuário não autenticado');
-      }
+// ✅ FUNÇÃO OTIMIZADA - substitua sua addTransactions por esta:
 
-      // Preparar dados para inserção
-      const transactionsToInsert = newTransactions.map(transaction => ({
-        id: transaction.id,
-        user_id: user.id,
-        mes: transaction.mes,
-        data: transaction.data,
-        descricao_origem: transaction.descricao_origem,
-        subtipo: transaction.subtipo || '',
-        categoria: transaction.categoria || '',
-        descricao: transaction.descricao || transaction.descricao_origem,
-        valor: transaction.valor,
-        origem: transaction.origem,
-        cc: transaction.cc,
-        realizado: transaction.realizado,
-        conta: transaction.conta || '',
-        // Campos de reconciliação
-        linked_future_group: transaction.linked_future_group || null,
-        is_from_reconciliation: transaction.is_from_reconciliation || false,
-        future_subscription_id: transaction.future_subscription_id || null,
-        reconciliation_metadata: transaction.reconciliation_metadata || null
-      }));
+const addTransactions = async (newTransactions: Transaction[]) => {
+  try {
+    console.log('📄 Iniciando addTransactions com:', newTransactions.length, 'transações');
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    
+    if (!user) {
+      throw new Error('Usuário não autenticado');
+    }
 
-      console.log('📝 Total de transações para inserir:', transactionsToInsert.length);
+    // Preparar dados para inserção (sem conta/categoria/subtipo - preenchidos por trigger)
+    const transactionsToInsert = newTransactions.map(transaction => ({
+      id: transaction.id,
+      user_id: user.id,
+      mes: transaction.mes,
+      data: transaction.data,
+      descricao_origem: transaction.descricao_origem,
+      descricao: transaction.descricao || transaction.descricao_origem,
+      valor: transaction.valor,
+      origem: transaction.origem,
+      cc: transaction.cc,
+      realizado: transaction.realizado,
+      // ✅ APENAS subtipo_id - trigger preencherá conta/categoria/subtipo automaticamente
+      subtipo_id: transaction.subtipo_id || null,
+      // Campos de reconciliação
+      linked_future_group: transaction.linked_future_group || null,
+      is_from_reconciliation: transaction.is_from_reconciliation || false,
+      future_subscription_id: transaction.future_subscription_id || null,
+      reconciliation_metadata: transaction.reconciliation_metadata || null
+    }));
 
-      // Verificar duplicatas
-      const existingIds = transactionsToInsert.map(t => t.id);
-      const { data: existingTransactions, error: checkError } = await supabase
-        .from('transactions')
-        .select('id')
-        .eq('user_id', user.id)
-        .in('id', existingIds);
+    console.log('📊 Total de transações para inserir:', transactionsToInsert.length);
 
-      if (checkError) {
-        console.error('⌐ Erro ao verificar duplicatas:', checkError);
-        throw checkError;
-      }
+    // ✅ OTIMIZAÇÃO 1: Verificar duplicatas de forma mais eficiente
+    const existingIds = transactionsToInsert.map(t => t.id);
+    const { data: existingTransactions, error: checkError } = await supabase
+      .from('transactions')
+      .select('id')
+      .eq('user_id', user.id)
+      .in('id', existingIds);
 
-      const existingIdSet = new Set(existingTransactions?.map(t => t.id) || []);
-      const duplicatesCount = existingIds.filter(id => existingIdSet.has(id)).length;
-      const newCount = transactionsToInsert.length - duplicatesCount;
+    if (checkError) {
+      console.error('❌ Erro ao verificar duplicatas:', checkError);
+      throw checkError;
+    }
 
-      console.log('📊 Análise de duplicatas:');
-      console.log('  📊 Total enviado:', transactionsToInsert.length);
-      console.log('  ✅ Novas:', newCount);
-      console.log('  📄 Duplicatas:', duplicatesCount);
+    const existingIdSet = new Set(existingTransactions?.map(t => t.id) || []);
+    const duplicatesCount = existingIds.filter(id => existingIdSet.has(id)).length;
+    
+    // ✅ OTIMIZAÇÃO 2: Filtrar apenas as novas ANTES de enviar
+    const onlyNewTransactions = transactionsToInsert.filter(t => !existingIdSet.has(t.id));
+    const newCount = onlyNewTransactions.length;
 
-      // Inserir com upsert
-      const { error: supabaseError } = await supabase
-        .from('transactions')
-        .upsert(transactionsToInsert, { 
-          onConflict: 'id',
-          ignoreDuplicates: false 
-        })
-        .select();
+    console.log('📊 Análise de duplicatas:');
+    console.log('  📊 Total enviado:', transactionsToInsert.length);
+    console.log('  ✅ Novas:', newCount);
+    console.log('  📄 Duplicatas:', duplicatesCount);
 
-      if (supabaseError) {
-        console.error('⌐ Erro do Supabase:', supabaseError);
-        throw supabaseError;
-      }
-
-      // Atualizar estado local
-      setTransactions(prev => {
-        const prevIdSet = new Set(prev.map(t => t.id));
-        const newOnes = newTransactions.filter(t => !prevIdSet.has(t.id));
-        console.log('✅ Adicionando ao estado local:', newOnes.length, 'novas transações');
-        return [...prev, ...newOnes];
-      });
-
-      console.log('✅ addTransactions concluído com sucesso');
+    // Se não há nada novo para inserir
+    if (onlyNewTransactions.length === 0) {
+      console.log('⏭️ Nenhuma transação nova para inserir');
       
       return {
         success: true,
         stats: {
           total: transactionsToInsert.length,
-          added: newCount,
+          added: 0,
           duplicates: duplicatesCount
         }
       };
-      
-    } catch (err) {
-      console.error('⌐ Erro completo:', err);
-      setError(err instanceof Error ? err.message : 'Erro ao salvar transações');
-      throw err;
     }
-  };
+
+    // ✅ OTIMIZAÇÃO 3: INSERT direto das novas (sem .select() lento)
+    console.log('🚀 Inserindo', onlyNewTransactions.length, 'transações novas...');
+    // console.log('🔍 Dados sendo enviados para Supabase:', JSON.stringify(onlyNewTransactions, null, 2));
+    const startTime = Date.now();
+
+    // console.log('🔍 Tentando inserir no Supabase...');
+    const { data: insertResult, error: supabaseError } = await supabase
+      .from('transactions')
+      .insert(onlyNewTransactions)
+      .select(); // Adicionar select para ver o que retorna
+    
+    // console.log('🔍 Resultado da inserção:', insertResult);
+    // console.log('🔍 Erro da inserção:', supabaseError);
+
+    const endTime = Date.now();
+    console.log(`⚡ Inserção concluída em ${endTime - startTime}ms`);
+
+    if (supabaseError) {
+      console.error('❌ Erro do Supabase - code:', supabaseError.code);
+      console.error('❌ Erro do Supabase - message:', supabaseError.message);
+      console.error('❌ Erro do Supabase - details:', supabaseError.details);
+      console.error('❌ Erro do Supabase - hint:', supabaseError.hint);
+      console.error('❌ Erro do Supabase - full object:', JSON.stringify(supabaseError, null, 2));
+      throw supabaseError;
+    }
+
+    // ✅ OTIMIZAÇÃO 4: Atualizar estado local apenas com as novas
+    setTransactions(prev => {
+      const newTransactionsToAdd = newTransactions.filter(t => !existingIdSet.has(t.id));
+      console.log('✅ Adicionando ao estado local:', newTransactionsToAdd.length, 'novas transações');
+      return [...prev, ...newTransactionsToAdd];
+    });
+
+    console.log('✅ addTransactions concluído com sucesso');
+    
+    return {
+      success: true,
+      stats: {
+        total: transactionsToInsert.length,
+        added: newCount,
+        duplicates: duplicatesCount
+      }
+    };
+    
+  } catch (err) {
+    console.error('❌ Erro completo:', err);
+    setError(err instanceof Error ? err.message : 'Erro ao salvar transações');
+    throw err;
+  }
+};
 
   // Atualizar uma transação específica
   const updateTransaction = async (updatedTransaction: Transaction): Promise<Transaction | null> => {
+    const transactionToUpdate = {
+      mes: updatedTransaction.mes,
+      data: updatedTransaction.data,
+      descricao_origem: updatedTransaction.descricao_origem,
+      // ✅ SÓ SUBTIPO_ID - os outros campos não existem mais
+      subtipo_id: updatedTransaction.subtipo_id || null,
+      descricao: updatedTransaction.descricao,
+      valor: updatedTransaction.valor,
+      origem: updatedTransaction.origem,
+      cc: updatedTransaction.cc,
+      realizado: updatedTransaction.realizado,
+      linked_future_group: updatedTransaction.linked_future_group || null,
+      is_from_reconciliation: updatedTransaction.is_from_reconciliation || false,
+      future_subscription_id: updatedTransaction.future_subscription_id || null,
+      reconciliation_metadata: updatedTransaction.reconciliation_metadata || null
+    };
+
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         throw new Error('Usuário não autenticado');
       }
 
-      const transactionToUpdate = {
-        mes: updatedTransaction.mes,
-        data: updatedTransaction.data,
-        descricao_origem: updatedTransaction.descricao_origem,
-        subtipo: updatedTransaction.subtipo,
-        categoria: updatedTransaction.categoria,
-        descricao: updatedTransaction.descricao,
-        valor: updatedTransaction.valor,
-        origem: updatedTransaction.origem,
-        cc: updatedTransaction.cc,
-        realizado: updatedTransaction.realizado,
-        conta: updatedTransaction.conta,
-        linked_future_group: updatedTransaction.linked_future_group || null,
-        is_from_reconciliation: updatedTransaction.is_from_reconciliation || false,
-        future_subscription_id: updatedTransaction.future_subscription_id || null,
-        reconciliation_metadata: updatedTransaction.reconciliation_metadata || null
-      };
+      // ✅ VERIFICAR SE A TRANSAÇÃO EXISTE ANTES DE ATUALIZAR
+      const { data: existingTransaction, error: checkError } = await supabase
+        .from('transactions')
+        .select('id, user_id')
+        .eq('id', updatedTransaction.id)
+        .single();
+
+      if (checkError) {
+        console.error('❌ Erro ao verificar transação existente:', checkError);
+        console.error('❌ ID procurado:', updatedTransaction.id);
+        throw new Error(`Transação não encontrada: ${updatedTransaction.id}`);
+      }
+
+      if (existingTransaction.user_id !== user.id) {
+        throw new Error('Transação pertence a outro usuário');
+      }
 
       const { data, error: supabaseError } = await supabase
         .from('transactions')
@@ -182,6 +251,8 @@ export function useTransactions() {
         .single();
 
       if (supabaseError) {
+        console.error('❌ Erro no update:', supabaseError);
+        console.error('❌ Dados enviados:', transactionToUpdate);
         throw supabaseError;
       }
 
@@ -194,7 +265,9 @@ export function useTransactions() {
 
       return data;
     } catch (err) {
-      console.error('Erro ao atualizar transação:', err);
+      console.error('❌ Erro COMPLETO ao atualizar transação:', err);
+      console.error('❌ Dados que tentei enviar:', transactionToUpdate);
+      console.error('❌ Transaction original:', updatedTransaction);
       setError(err instanceof Error ? err.message : 'Erro ao atualizar transação');
       throw err;
     }
@@ -229,22 +302,19 @@ export function useTransactions() {
           ? `${dateParts[0].slice(-2)}${dateParts[1]}` 
           : '';
 
-        // Determinar conta baseada na categoria
-        const conta = card.categoria ? getContaFromCategoria(card.categoria) : '';
+        // Conta será determinada por trigger no banco baseada no subtipo_id
 
         return {
           id: transactionId,
           mes: mes,
           data: card.data_transacao,
           descricao_origem: card.descricao_origem,
-          subtipo: card.subtipo || '',
-          categoria: card.categoria || '',
+          subtipo_id: null, // Será classificado depois
           descricao: card.descricao_classificada || card.descricao_origem,
           valor: card.valor,
           origem: card.origem, // Mantém origem original (ex: "MasterCard", "VISA")
           cc: linkedPaymentTransaction.cc, // ✅ CORREÇÃO: Herda CC do pagamento!
-          realizado: 's' as const, // ✅ Marcar como realizado normal (conta no saldo)
-          conta: conta,
+          realizado: 's' as const,
           // Metadata de reconciliação
           linked_future_group: faturaId,
           is_from_reconciliation: true,
@@ -260,7 +330,7 @@ export function useTransactions() {
         };
       });
 
-      console.log('📝 Preparadas', newTransactions.length, 'novas transactions');
+      console.log('📊 Preparadas', newTransactions.length, 'novas transactions');
       console.log('🏦 Todas as transactions terão CC:', linkedPaymentTransaction.cc);
 
       // Inserir em lotes
@@ -281,7 +351,7 @@ export function useTransactions() {
           .insert(batchToInsert);
 
         if (insertError) {
-          console.error('⌐ Erro ao inserir batch:', insertError);
+          console.error('❌ Erro ao inserir batch:', insertError);
           errors.push(`Erro no batch ${i/BATCH_SIZE + 1}: ${insertError.message}`);
         } else {
           createdCount += batch.length;
@@ -300,7 +370,7 @@ export function useTransactions() {
       };
 
     } catch (err) {
-      console.error('⌐ Erro ao criar transactions:', err);
+      console.error('❌ Erro ao criar transactions:', err);
       return {
         success: false,
         created: 0,
@@ -329,9 +399,7 @@ export function useTransactions() {
         fatura_id: faturaId,
         reconciled_by: 'manual',
         original_valor: transaction.valor,
-        original_conta: transaction.conta,
-        original_categoria: transaction.categoria,
-        original_subtipo: transaction.subtipo,
+        original_subtipo_id: transaction.subtipo_id,
         status: 'payment_reconciled'
       };
 
@@ -349,7 +417,7 @@ export function useTransactions() {
       return { success: true };
 
     } catch (err) {
-      console.error('⌐ Erro ao marcar como reconciliada:', err);
+      console.error('❌ Erro ao marcar como reconciliada:', err);
       throw err;
     }
   };
@@ -396,10 +464,127 @@ export function useTransactions() {
       };
 
     } catch (err) {
-      console.error('⌐ Erro na reconciliação completa:', err);
+      console.error('❌ Erro na reconciliação completa:', err);
       return {
         success: false,
         createdTransactions: 0,
+        errors: [err instanceof Error ? err.message : 'Erro desconhecido']
+      };
+    }
+  };
+
+  // ===== NOVA FUNÇÃO: Executar quebra Inter Pag =====
+  const executeInterPagSplit = async (
+    originalTransactions: Transaction[],
+    splitResults: InterPagSplitResult[]
+  ): Promise<{
+    success: boolean;
+    createdTransactions: number;
+    reconciledTransactions: number;
+    errors: string[];
+  }> => {
+    try {
+      console.log('🟠 Executando quebra Inter Pag...');
+      console.log('📊 Transações originais:', originalTransactions.length);
+      console.log('📈 Resultados de quebra:', splitResults.length);
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error('Usuário não autenticado');
+      }
+
+      let createdCount = 0;
+      let reconciledCount = 0;
+      const errors: string[] = [];
+
+      // ETAPA 1: Marcar transações originais como reconciliadas (realizado = 'r')
+      for (const transaction of originalTransactions) {
+        try {
+          const reconciliationMetadata = {
+            reconciled_at: new Date().toISOString(),
+            reconciled_by: 'interpag_split',
+            original_valor: transaction.valor,
+            split_type: 'interpag_percentage',
+            status: 'split_reconciled'
+          };
+
+          const updatedTransaction: Transaction = {
+            ...transaction,
+            is_from_reconciliation: true,
+            reconciliation_metadata: JSON.stringify(reconciliationMetadata),
+            realizado: 'r' as const // ✅ CRUCIAL: 'r' = reconciliado (não conta no saldo)
+          };
+
+          await updateTransaction(updatedTransaction);
+          reconciledCount++;
+
+          console.log(`✅ Transação ${transaction.id} marcada como reconciliada`);
+
+        } catch (error) {
+          console.error(`❌ Erro ao reconciliar transação ${transaction.id}:`, error);
+          errors.push(`Erro ao reconciliar ${transaction.id}: ${error}`);
+        }
+      }
+
+      // ETAPA 2: Criar novas transações quebradas
+      const allNewTransactions: Transaction[] = [];
+
+      for (const splitResult of splitResults) {
+        // Adicionar transação de catálogo (se valor > 0)
+        if (splitResult.catalogoTransaction.valor && splitResult.catalogoTransaction.valor > 0) {
+          allNewTransactions.push(splitResult.catalogoTransaction as Transaction);
+        }
+
+        // Adicionar transação de planos (se valor > 0)
+        if (splitResult.planosTransaction.valor && splitResult.planosTransaction.valor > 0) {
+          allNewTransactions.push(splitResult.planosTransaction as Transaction);
+        }
+      }
+
+      // Inserir as novas transações
+      if (allNewTransactions.length > 0) {
+        const transactionsToInsert = allNewTransactions.map(transaction => ({
+          ...transaction,
+          user_id: user.id,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }));
+
+        const { error: insertError } = await supabase
+          .from('transactions')
+          .insert(transactionsToInsert);
+
+        if (insertError) {
+          console.error('❌ Erro ao inserir transações quebradas:', insertError);
+          errors.push(`Erro ao inserir transações: ${insertError.message}`);
+        } else {
+          createdCount = allNewTransactions.length;
+          console.log(`✅ ${createdCount} novas transações criadas`);
+        }
+      }
+
+      // ETAPA 3: Recarregar dados
+      await loadTransactions();
+
+      console.log('✅ Quebra Inter Pag concluída:', {
+        reconciledCount,
+        createdCount,
+        errorsCount: errors.length
+      });
+
+      return {
+        success: createdCount > 0 && reconciledCount > 0,
+        createdTransactions: createdCount,
+        reconciledTransactions: reconciledCount,
+        errors
+      };
+
+    } catch (err) {
+      console.error('❌ Erro na quebra Inter Pag:', err);
+      return {
+        success: false,
+        createdTransactions: 0,
+        reconciledTransactions: 0,
         errors: [err instanceof Error ? err.message : 'Erro desconhecido']
       };
     }
@@ -409,8 +594,7 @@ export function useTransactions() {
   const splitTransaction = async (
     originalTransaction: Transaction, 
     parts: Array<{
-      categoria: string;
-      subtipo: string;
+      subtipo_id: string;
       descricao: string;
       valor: number;
     }>
@@ -423,14 +607,7 @@ export function useTransactions() {
 
       console.log('📄 Iniciando divisão da transação:', originalTransaction.id);
 
-      // Função para determinar a conta automaticamente
-      const getAccountForTransaction = (transaction: Transaction): string => {
-        if (transaction.descricao_origem?.toLowerCase().includes('pix') || 
-            transaction.descricao_origem?.toLowerCase().includes('transferencia')) {
-          return 'PJ';
-        }
-        return 'PF';
-      };
+      // Account será determinado por trigger no banco
 
       // ETAPA 1: Deletar transação original
       const { error: deleteError } = await supabase
@@ -446,22 +623,19 @@ export function useTransactions() {
       console.log('✅ Transação original deletada');
 
       // ETAPA 2: Criar novas transações divididas
-      const account = getAccountForTransaction(originalTransaction);
       
-      // ✅ CORREÇÃO: Usar tipos literais corretos
+      // ✅ CORREÇÃO: Usar apenas subtipo_id
       const newTransactions: Omit<Transaction, 'user_id'>[] = parts.map((part, index) => ({
         id: `${originalTransaction.id}-${index + 1}`,
         mes: originalTransaction.mes,
         data: originalTransaction.data,
         descricao_origem: originalTransaction.descricao_origem,
-        subtipo: part.subtipo,
-        categoria: part.categoria,
+        subtipo_id: part.subtipo_id,
         descricao: part.descricao,
         valor: part.valor,
         origem: originalTransaction.origem,
         cc: originalTransaction.cc,
-        realizado: 's' as const, // ✅ Usar 'as const' para garantir tipo literal
-        conta: account,
+        realizado: 's' as const,
         linked_future_group: originalTransaction.linked_future_group,
         is_from_reconciliation: originalTransaction.is_from_reconciliation,
         future_subscription_id: originalTransaction.future_subscription_id,
@@ -494,14 +668,12 @@ export function useTransactions() {
           mes: nt.mes,
           data: nt.data,
           descricao_origem: nt.descricao_origem,
-          subtipo: nt.subtipo,
-          categoria: nt.categoria,
+          subtipo_id: nt.subtipo_id,
           descricao: nt.descricao,
           valor: nt.valor,
           origem: nt.origem,
           cc: nt.cc,
-          realizado: nt.realizado, // ✅ Agora está tipado corretamente como 's'
-          conta: nt.conta,
+          realizado: nt.realizado,
           linked_future_group: nt.linked_future_group,
           is_from_reconciliation: nt.is_from_reconciliation,
           future_subscription_id: nt.future_subscription_id,
@@ -519,7 +691,7 @@ export function useTransactions() {
       };
 
     } catch (err) {
-      console.error('⌐ Erro ao dividir transação:', err);
+      console.error('❌ Erro ao dividir transação:', err);
       setError(err instanceof Error ? err.message : 'Erro ao dividir transação');
       throw err;
     }
@@ -532,9 +704,7 @@ export function useTransactions() {
     origem: string;
     cc: string;
     descricao: string;
-    conta: string;
-    categoria: string;
-    subtipo: string;
+    subtipo_id: string; // ✅ NOVO: Apenas subtipo_id
   }): Promise<Transaction> => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -552,20 +722,18 @@ export function useTransactions() {
         ? `${dateParts[0].slice(-2)}${dateParts[1]}` 
         : '';
 
-      // Criar objeto Transaction
+      // ✅ NOVO: Criar objeto Transaction apenas com subtipo_id
       const newTransaction: Transaction = {
         id: transactionId,
         mes: mes,
         data: formData.data,
         descricao_origem: formData.descricao,
-        subtipo: formData.subtipo,
-        categoria: formData.categoria,
         descricao: formData.descricao,
         valor: formData.valor,
         origem: formData.origem,
         cc: formData.cc,
         realizado: 's' as const, // ✅ Lançamento manual sempre realizado
-        conta: formData.conta,
+        subtipo_id: formData.subtipo_id, // ✅ ÚNICO campo de hierarquia
         // Campos de reconciliação vazios para lançamento manual
         linked_future_group: undefined,
         is_from_reconciliation: false,
@@ -577,11 +745,10 @@ export function useTransactions() {
         })
       };
 
-      console.log('📝 Criando lançamento manual:', {
+      console.log('📊 Criando lançamento manual:', {
         id: transactionId,
         valor: formData.valor,
-        categoria: formData.categoria,
-        subtipo: formData.subtipo
+        subtipo_id: formData.subtipo_id
       });
 
       // Inserir no Supabase
@@ -712,6 +879,7 @@ export function useTransactions() {
     createTransactionsFromCards,
     executeReconciliation,
     createManualTransaction, // ✅ NOVA FUNÇÃO
+    executeInterPagSplit, // ✅ NOVA FUNÇÃO PARA INTER PAG
     
     // ✅ NOVAS FUNÇÕES AUXILIARES
     getBalanceTransactions,      // Só as que contam no saldo (realizado = 's')

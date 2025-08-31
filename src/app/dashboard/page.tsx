@@ -1,4 +1,4 @@
-// page.tsx - VERSÃO ATUALIZADA COM INTEGRAÇÃO DA PLANILHA FINANCEIRA
+// page.tsx - ATUALIZADO COM CLASSIFICAÇÃO COMPLEXA
 
 'use client';
 
@@ -6,6 +6,7 @@ import React, { useState, useEffect } from 'react';
 import { Upload } from 'lucide-react';
 import { Transaction } from '@/types';
 import { CardTransaction, ImportResult } from '@/hooks/useCardTransactions';
+import { ConfigProvider } from '@/contexts/ConfigContext';
 
 // Hooks
 import { useTransactions } from '@/hooks/useTransactions';
@@ -15,11 +16,11 @@ import { useCardTransactions } from '@/hooks/useCardTransactions';
 import BankUpload from '@/components/BankUpload';
 import { NavigationTabs } from '@/components/NavigationTabs';
 import { InboxTab } from '@/components/InboxTab';
-import { ComplexClassificationTab } from '@/components/ComplexClassificationTab'; // ✅ COMPONENT ATUALIZADO
 import { OverviewTab } from '@/components/OverviewTab';
 import { AnalyticsTab } from '@/components/AnalyticsTab';
 import { ContasTab } from '@/components/ContasTab';
 import { CartoesTab } from '@/components/CartoesTab';
+import ComplexClassificationTab from '@/components/ComplexClassificationTab'; // ✅ IMPORT CORRIGIDO
 import { EditTransactionModal } from '@/components/EditTransactionModal';
 import { EditCardTransactionModal } from '@/components/EditTransactionModal';
 import { SplitTransactionModal } from '@/components/SplitTransactionModal';
@@ -34,7 +35,8 @@ export default function DashboardPage() {
     addTransactions, 
     updateTransaction, 
     splitTransaction,
-    executeReconciliation 
+    executeReconciliation,
+    refreshTransactions
   } = useTransactions();
   
   const { 
@@ -51,7 +53,10 @@ export default function DashboardPage() {
   } = useCardTransactions();
   
   // ===== ESTADOS =====
-  const [activeTab, setActiveTab] = useState('inbox');
+  const [activeTab, setActiveTab] = useState(() => {
+    // Começar na overview por padrão, mudará para inbox se houver items
+    return 'overview';
+  });
   const [showBankUpload, setShowBankUpload] = useState(false);
   
   // Estados para modais de edição
@@ -102,24 +107,8 @@ export default function DashboardPage() {
     return getAvailableFaturas().length > 0;
   };
 
-  // ===== FUNÇÕES PARA CLASSIFICAÇÃO COMPLEXA =====
+  // ===== ✅ MANTER: FUNÇÕES PARA MOVER PARA CLASSIFICAÇÃO COMPLEXA =====
   
-  // Obter transações na classificação complexa
-  const getComplexTransactions = (): Transaction[] => {
-    return transactions.filter(t => 
-      t.conta === 'COMPLEXA' && 
-      t.categoria === 'COMPLEXA' && 
-      t.subtipo === 'COMPLEXA'
-    );
-  };
-
-  const getComplexCardTransactions = (): CardTransaction[] => {
-    return cardTransactions.filter(c => 
-      c.categoria === 'COMPLEXA' && 
-      c.subtipo === 'COMPLEXA'
-    );
-  };
-
   // Mover para classificação complexa
   const handleMoveToComplexClassification = async (transactionId: string): Promise<void> => {
     try {
@@ -127,13 +116,14 @@ export default function DashboardPage() {
       const transaction = transactions.find(t => t.id === transactionId);
       const cardTransaction = cardTransactions.find(c => c.id === transactionId);
 
+      // ID correto do subtipo para classificação complexa
+      const COMPLEX_SUBTIPO_ID = 'e92f4f0f-4e94-4007-8945-a1fb47782051';
+
       if (transaction) {
-        // Atualizar transaction
+        // Atualizar transaction usando subtipo_id
         const updatedTransaction: Transaction = {
           ...transaction,
-          conta: 'COMPLEXA',
-          categoria: 'COMPLEXA',
-          subtipo: 'COMPLEXA',
+          subtipo_id: COMPLEX_SUBTIPO_ID,
           descricao: transaction.descricao_origem || 'Classificação Complexa',
           realizado: 'p' // Manter como pendente
         };
@@ -142,11 +132,10 @@ export default function DashboardPage() {
         console.log('✅ Transaction movida para classificação complexa:', transactionId);
         
       } else if (cardTransaction) {
-        // Atualizar card transaction
+        // Atualizar card transaction usando subtipo_id
         const updatedCardTransaction: CardTransaction = {
           ...cardTransaction,
-          categoria: 'COMPLEXA',
-          subtipo: 'COMPLEXA',
+          subtipo_id: COMPLEX_SUBTIPO_ID,
           descricao_classificada: cardTransaction.descricao_origem || 'Classificação Complexa',
           status: 'pending' // Manter como pendente
         };
@@ -159,67 +148,35 @@ export default function DashboardPage() {
       }
       
     } catch (error) {
-      console.error('❌ Erro ao mover para classificação complexa:', error);
-      throw error;
-    }
-  };
-
-  // Remover da classificação complexa
-  const handleRemoveFromComplexClassification = async (transactionId: string, type: 'transaction' | 'card'): Promise<void> => {
-    try {
-      if (type === 'transaction') {
-        const transaction = transactions.find(t => t.id === transactionId);
-        if (!transaction) throw new Error('Transaction não encontrada');
-
-        // Reverter para não classificada
-        const updatedTransaction: Transaction = {
-          ...transaction,
-          conta: '',
-          categoria: '',
-          subtipo: '',
-          descricao: transaction.descricao_origem || '',
-          realizado: 'p'
-        };
-        
-        await updateTransaction(updatedTransaction);
-        console.log('✅ Transaction removida da classificação complexa:', transactionId);
-        
-      } else if (type === 'card') {
-        const cardTransaction = cardTransactions.find(c => c.id === transactionId);
-        if (!cardTransaction) throw new Error('CardTransaction não encontrada');
-
-        // Reverter para não classificada
-        const updatedCardTransaction: CardTransaction = {
-          ...cardTransaction,
-          categoria: null,
-          subtipo: null,
-          descricao_classificada: null,
-          status: 'pending'
-        };
-        
-        await updateCardTransaction(updatedCardTransaction);
-        console.log('✅ CardTransaction removida da classificação complexa:', transactionId);
-      }
-      
-    } catch (error) {
-      console.error('❌ Erro ao remover da classificação complexa:', error);
+      console.error('⛔ Erro ao mover para classificação complexa:', error);
       throw error;
     }
   };
 
   // ===== CONTADORES PARA BADGES =====
+  const COMPLEX_SUBTIPO_ID = 'e92f4f0f-4e94-4007-8945-a1fb47782051';
+  
   const unclassifiedCount = transactions.filter(t => t.realizado === 'p' && 
-    !(t.conta === 'COMPLEXA' && t.categoria === 'COMPLEXA' && t.subtipo === 'COMPLEXA')
+    t.subtipo_id !== COMPLEX_SUBTIPO_ID
   ).length;
   
   const unclassifiedCardsCount = cardTransactions.filter(c => c.status === 'pending' && 
-    !(c.categoria === 'COMPLEXA' && c.subtipo === 'COMPLEXA')
+    c.subtipo_id !== COMPLEX_SUBTIPO_ID
+  ).length;
+  
+  // ⭐ NOVO: Contador de transações complexas (sem duplicação)
+  const complexCount = transactions.filter(t => 
+    t.subtipo_id === COMPLEX_SUBTIPO_ID && t.realizado !== 'r'  // Só COMPLEXA, excluindo reconciliadas
+  ).length + cardTransactions.filter(c => 
+    c.subtipo_id === COMPLEX_SUBTIPO_ID && c.status !== 'reconciled'  // Só COMPLEXA, excluindo reconciliadas
   ).length;
   
   const hasReconciliationPending = getAvailableFaturas().length > 0;
+
+  // ===== AUTO-NAVEGAÇÃO PARA INBOX =====
+  const totalPending = unclassifiedCount + unclassifiedCardsCount;
   
-  // ✅ CONTADOR: Transações na classificação complexa
-  const complexCount = getComplexTransactions().length + getComplexCardTransactions().length;
+  // Removed auto-navigation logic - let user choose freely
 
   // ===== HANDLERS DE EDIÇÃO =====
   
@@ -250,8 +207,7 @@ export default function DashboardPage() {
   };
 
   const handleConfirmSplit = async (parts: Array<{
-    categoria: string;
-    subtipo: string;
+    subtipo_id: string;
     descricao: string;
     valor: number;
   }>) => {
@@ -264,8 +220,8 @@ export default function DashboardPage() {
         setSplitingTransaction(null);
       }
     } catch (error) {
-      console.error('❌ Erro ao dividir transação:', error);
-      alert('❌ Erro ao dividir transação');
+      console.error('⛔ Erro ao dividir transação:', error);
+      alert('⛔ Erro ao dividir transação');
     }
   };
 
@@ -282,7 +238,7 @@ export default function DashboardPage() {
           await handleMoveToComplexClassification(transactionId);
           successCount++;
         } catch (error) {
-          console.error(`❌ Erro ao mover transação ${transactionId}:`, error);
+          console.error(`⛔ Erro ao mover transação ${transactionId}:`, error);
           errors.push(`Transação ${transactionId}: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
         }
       }
@@ -298,7 +254,7 @@ export default function DashboardPage() {
       }
       
     } catch (error) {
-      console.error('❌ Erro no batch de classificação complexa:', error);
+      console.error('⛔ Erro no batch de classificação complexa:', error);
       throw error;
     }
   };
@@ -318,8 +274,8 @@ export default function DashboardPage() {
         setSplitingCardTransaction(null);
       }
     } catch (error) {
-      console.error('❌ Erro ao dividir transação de cartão:', error);
-      alert('❌ Erro ao dividir transação de cartão');
+      console.error('⛔ Erro ao dividir transação de cartão:', error);
+      alert('⛔ Erro ao dividir transação de cartão');
     }
   };
 
@@ -357,7 +313,7 @@ export default function DashboardPage() {
       return result;
       
     } catch (error) {
-      console.error('❌ Erro ao importar cartões:', error);
+      console.error('⛔ Erro ao importar cartões:', error);
       throw error;
     }
   };
@@ -390,8 +346,8 @@ export default function DashboardPage() {
       setSimpleDiffData(null);
       
     } catch (error) {
-      console.error('❌ Erro ao aplicar SimpleDiff:', error);
-      alert('❌ Erro ao aplicar mudanças');
+      console.error('⛔ Erro ao aplicar SimpleDiff:', error);
+      alert('⛔ Erro ao aplicar mudanças');
     }
   };
 
@@ -418,13 +374,13 @@ export default function DashboardPage() {
       setSimpleDiffData(null);
       
     } catch (error) {
-      console.error('❌ Erro na substituição:', error);
-      alert('❌ Erro ao substituir fatura');
+      console.error('⛔ Erro na substituição:', error);
+      alert('⛔ Erro ao substituir fatura');
     }
   };
 
   const handleSimpleDiffCancel = () => {
-    console.log('❌ Importação cancelada pelo usuário');
+    console.log('⛔ Importação cancelada pelo usuário');
     setShowSimpleDiff(false);
     setSimpleDiffData(null);
     alert('ℹ️ Importação cancelada');
@@ -465,8 +421,8 @@ export default function DashboardPage() {
         throw new Error(result.errors.join(', '));
       }
     } catch (error) {
-      console.error('❌ Erro na reconciliação:', error);
-      alert('❌ Erro na reconciliação');
+      console.error('⛔ Erro na reconciliação:', error);
+      alert('⛔ Erro na reconciliação');
     }
   };
 
@@ -479,17 +435,15 @@ export default function DashboardPage() {
 
       const updatedTransaction: Transaction = {
         ...transaction,
-        conta: classification.conta,
-        categoria: classification.categoria,
-        subtipo: classification.subtipo,
+        subtipo_id: classification.subtipo_id,
         descricao: classification.descricao,
         realizado: 's'
       };
 
       await updateTransaction(updatedTransaction);
     } catch (error) {
-      console.error('❌ Erro na classificação rápida:', error);
-      alert('❌ Erro ao aplicar classificação');
+      console.error('⛔ Erro na classificação rápida:', error);
+      alert('⛔ Erro ao aplicar classificação');
     }
   };
 
@@ -500,24 +454,21 @@ export default function DashboardPage() {
 
       const updatedCard: CardTransaction = {
         ...card,
-        categoria: classification.categoria,
-        subtipo: classification.subtipo,
+        subtipo_id: classification.subtipo_id,
         descricao_classificada: classification.descricao,
         status: 'classified'
       };
 
       await updateCardTransaction(updatedCard);
     } catch (error) {
-      console.error('❌ Erro na classificação rápida:', error);
-      alert('❌ Erro ao aplicar classificação');
+      console.error('⛔ Erro na classificação rápida:', error);
+      alert('⛔ Erro ao aplicar classificação');
     }
   };
 
   const handleBatchClassificationTransactions = async (classifications: Array<{
     id: string;
-    conta: string;
-    categoria: string;
-    subtipo: string;
+    subtipo_id: string;
     descricao: string;
   }>) => {
     try {
@@ -527,9 +478,7 @@ export default function DashboardPage() {
 
         const updatedTransaction: Transaction = {
           ...transaction,
-          conta: classification.conta,
-          categoria: classification.categoria,
-          subtipo: classification.subtipo,
+          subtipo_id: classification.subtipo_id,
           descricao: classification.descricao,
           realizado: 's'
         };
@@ -539,39 +488,34 @@ export default function DashboardPage() {
       
       alert(`✅ ${classifications.length} transações classificadas!`);
     } catch (error) {
-      console.error('❌ Erro na classificação em lote:', error);
-      alert('❌ Erro ao aplicar classificações');
+      console.error('⛔ Erro na classificação em lote:', error);
+      alert('⛔ Erro ao aplicar classificações');
     }
   };
 
   const handleBatchClassificationCards = async (classifications: Array<{
     id: string;
-    conta: string;
-    categoria: string;
-    subtipo: string;
+    subtipo_id: string;
     descricao: string;
   }>) => {
     try {
       const updates = classifications.map(c => ({
         id: c.id,
-        categoria: c.categoria,
-        subtipo: c.subtipo,
+        subtipo_id: c.subtipo_id,
         descricao_classificada: c.descricao
       }));
       
       const count = await updateMultipleCardTransactions(updates);
       alert(`✅ ${count} transações de cartão classificadas!`);
     } catch (error) {
-      console.error('❌ Erro na classificação em lote:', error);
-      alert('❌ Erro ao aplicar classificações');
+      console.error('⛔ Erro na classificação em lote:', error);
+      alert('⛔ Erro ao aplicar classificações');
     }
   };
 
   const handleBatchClassification = async (classifications: Array<{
     id: string;
-    conta: string;
-    categoria: string;
-    subtipo: string;
+    subtipo_id: string;
     descricao: string;
   }>) => {
     const transactionClassifications: typeof classifications = [];
@@ -594,20 +538,54 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-900">
-      <div className="max-w-md mx-auto p-4">
+    <ConfigProvider>
+      <div className="min-h-screen bg-gray-900">
+      <div className="max-w-md mx-auto p-4 pb-20">
         {/* Header */}
-        <div className="bg-gradient-to-r from-purple-600 to-blue-600 text-white p-4 rounded-lg mb-4 shadow-lg relative">
-          <h1 className="text-xl font-bold text-center" style={{ fontFamily: 'monospace, Courier New' }}>
-            LAÇOS 2.0 - Simplificado
-          </h1>
-          <button
-            onClick={() => setShowBankUpload(true)}
-            className="absolute right-4 top-1/2 transform -translate-y-1/2 w-8 h-8 bg-white/20 hover:bg-white/30 rounded-full flex items-center justify-center transition-colors"
-            title="Importar dados"
-          >
-            <span className="text-2xl leading-none mb-1">+</span>
-          </button>
+        <div className="bg-gradient-to-br from-gray-900 via-purple-950 to-black border border-purple-900/50 text-white py-4 px-4 rounded-xl mb-4 shadow-2xl relative overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-r from-purple-900/10 via-indigo-900/10 to-gray-900/10 blur-xl opacity-30 animate-pulse"></div>
+          
+          {/* Matrix effect background */}
+          <div className="absolute inset-0 opacity-5">
+            <div className="absolute top-2 left-4 text-green-400 text-xs font-mono animate-pulse">01001100</div>
+            <div className="absolute top-6 right-8 text-blue-400 text-xs font-mono animate-pulse delay-75">AI.v3.0</div>
+            <div className="absolute bottom-2 left-8 text-cyan-400 text-xs font-mono animate-pulse delay-150">NEURAL</div>
+            <div className="absolute bottom-6 right-4 text-purple-400 text-xs font-mono animate-pulse delay-300">QUANTUM</div>
+          </div>
+          
+          <div className="relative">
+            {/* Main title - spanning full width */}
+            <div className="flex items-center justify-between mb-3">
+              <div className="h-px bg-gradient-to-r from-transparent via-cyan-500/50 to-cyan-500 flex-1"></div>
+              <h1 className="text-3xl md:text-4xl font-black mx-4 relative group">
+                <span className="bg-gradient-to-r from-cyan-300 via-purple-300 to-pink-300 bg-clip-text text-transparent tracking-wider">
+                  LAÇOS 3.0
+                </span>
+                <div className="absolute -inset-2 bg-gradient-to-r from-cyan-600 via-purple-600 to-pink-600 rounded-lg blur opacity-20 group-hover:opacity-60 transition duration-1000"></div>
+              </h1>
+              <div className="h-px bg-gradient-to-r from-cyan-500 via-cyan-500/50 to-transparent flex-1"></div>
+            </div>
+            
+            {/* Subtitle - full width bar */}
+            <div className="bg-gradient-to-r from-gray-900/90 via-purple-900/40 to-gray-900/90 border border-cyan-500/20 rounded-full py-2 px-6 backdrop-blur-sm">
+              <div className="flex items-center justify-center gap-3">
+                <div className="w-2 h-2 bg-cyan-400 rounded-full animate-ping"></div>
+                <span className="text-sm font-mono font-bold text-transparent bg-gradient-to-r from-cyan-400 via-purple-400 to-pink-400 bg-clip-text tracking-wide">
+                  ULTIMATE FINANCIAL AI SYSTEM
+                </span>
+                <div className="w-2 h-2 bg-purple-400 rounded-full animate-ping delay-150"></div>
+              </div>
+              
+              {/* Neural network lines */}
+              <div className="flex justify-center mt-2 gap-1">
+                <div className="w-8 h-px bg-gradient-to-r from-transparent to-cyan-400 animate-pulse"></div>
+                <div className="w-4 h-px bg-gradient-to-r from-cyan-400 to-purple-400 animate-pulse delay-75"></div>
+                <div className="w-6 h-px bg-gradient-to-r from-purple-400 to-pink-400 animate-pulse delay-150"></div>
+                <div className="w-4 h-px bg-gradient-to-r from-pink-400 to-purple-400 animate-pulse delay-225"></div>
+                <div className="w-8 h-px bg-gradient-to-r from-purple-400 to-transparent animate-pulse delay-300"></div>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Área de importação inicial */}
@@ -627,28 +605,38 @@ export default function DashboardPage() {
         {/* Navegação e conteúdo principal */}
         {(transactions.length > 0 || cardTransactions.length > 0) && (
           <>
-            {/* Navegação com Badges - ✅ ATUALIZADA COM complexCount */}
-            <NavigationTabs
-              activeTab={activeTab}
-              setActiveTab={setActiveTab}
-              unclassifiedCount={unclassifiedCount}
-              unclassifiedCardsCount={unclassifiedCardsCount}
-              hasReconciliationPending={hasReconciliationPending}
-              complexCount={complexCount} // ✅ NOVA PROP
-            />
+            {/* ⭐ ATUALIZADO: NavigationTabs com complexCount - STICKY */}
+            <div className="sticky top-0 z-50 bg-gray-900 pb-2 -mx-4 px-4 pt-2">
+              <NavigationTabs
+                activeTab={activeTab}
+                setActiveTab={setActiveTab}
+                unclassifiedCount={unclassifiedCount}
+                unclassifiedCardsCount={unclassifiedCardsCount}
+                hasReconciliationPending={hasReconciliationPending}
+                complexCount={complexCount} // ⭐ NOVO
+                transactions={transactions} // ⭐ NOVO
+                onShowUpload={() => setShowBankUpload(true)} // ⭐ NOVO
+              />
+            </div>
 
             {/* Conteúdo das abas */}
-            {/* Aba Inbox - ATUALIZADA para incluir a nova função */}
+            {/* Aba Inbox - MANTIDA com função de mover para complexa */}
             {activeTab === 'inbox' && (
               <InboxTab
-                unclassifiedTransactions={transactions.filter(t => 
-                  t.realizado === 'p' && 
-                  !(t.conta === 'COMPLEXA' && t.categoria === 'COMPLEXA' && t.subtipo === 'COMPLEXA')
-                )}
-                unclassifiedCards={cardTransactions.filter(c => 
-                  c.status === 'pending' && 
-                  !(c.categoria === 'COMPLEXA' && c.subtipo === 'COMPLEXA')
-                )}
+                unclassifiedTransactions={transactions
+                  .filter(t => 
+                    t.realizado === 'p' && 
+                    t.subtipo_id !== COMPLEX_SUBTIPO_ID
+                  )
+                  .sort((a, b) => new Date(b.data).getTime() - new Date(a.data).getTime())
+                }
+                unclassifiedCards={cardTransactions
+                  .filter(c => 
+                    c.status === 'pending' && 
+                    c.subtipo_id !== COMPLEX_SUBTIPO_ID
+                  )
+                  .sort((a, b) => new Date(b.data_transacao).getTime() - new Date(a.data_transacao).getTime())
+                }
                 historicTransactions={transactions.filter(t => t.realizado === 's')}
                 historicCardTransactions={cardTransactions.filter(c => c.status === 'classified')}
                 onEditTransaction={handleEditTransaction}
@@ -667,17 +655,29 @@ export default function DashboardPage() {
               />
             )}
 
-            {/* ✅ NOVA ABA: Classificação Complexa COM PLANILHA INTEGRADA */}
-            {activeTab === 'complex' && (
-              <ComplexClassificationTab
-                complexTransactions={getComplexTransactions()}
-                complexCardTransactions={getComplexCardTransactions()}
-                onEditTransaction={handleEditTransaction}
-                onEditCardTransaction={handleEditCardTransaction}
-                onRemoveFromComplex={handleRemoveFromComplexClassification}
-                onApplyBatchClassification={handleBatchClassification}
-              />
-            )}
+{/* ⭐ NOVA ABA: Classificação Complexa */}
+{activeTab === 'complex' && (
+  <ComplexClassificationTab
+    transactions={transactions}
+    cardTransactions={cardTransactions}
+    historicTransactions={transactions.filter(t => t.realizado === 's')}
+    historicCardTransactions={cardTransactions.filter(c => c.status === 'classified')}
+    addTransactions={addTransactions}
+    onTransactionUpdate={(id: string, updates: Partial<Transaction>) => {
+      const fullTransaction = { ...transactions.find(t => t.id === id)!, ...updates };
+      return updateTransaction(fullTransaction);
+    }}
+    onCardTransactionUpdate={(id: string, updates: Partial<CardTransaction>) => {
+      const fullCardTransaction = { ...cardTransactions.find(c => c.id === id)!, ...updates };
+      return updateCardTransaction(fullCardTransaction);
+    }}
+    onTransactionReload={refreshTransactions}
+    onCardTransactionReload={() => {
+      // Recarregar card transactions - implementar se necessário
+      console.log('Card transaction reload requested');
+    }}
+  />
+)}
 
             {activeTab === 'overview' && (
               <OverviewTab 
@@ -688,7 +688,7 @@ export default function DashboardPage() {
 
             {activeTab === 'cards' && (
               <CartoesTab 
-                cardTransactions={cardTransactions.filter(c => c.status === 'classified')}
+                cardTransactions={cardTransactions.filter(c => c.status === 'classified' || c.status === 'reconciled')}
                 onEditCardTransaction={handleEditCardTransaction}
               />
             )}
@@ -701,32 +701,6 @@ export default function DashboardPage() {
               <ContasTab transactions={transactions} />
             )}
 
-            {/* Botão para importar novo arquivo */}
-            <div className="mt-4">
-              <button
-                onClick={() => setShowBankUpload(true)}
-                className="w-full p-2 bg-gray-700 text-gray-100 rounded-lg hover:bg-gray-600 transition-colors border border-gray-600"
-              >
-                📄 Importar Novo Arquivo
-              </button>
-            </div>
-
-            {/* Indicador de reconciliação disponível */}
-            {canReconcile() && activeTab !== 'inbox' && (
-              <div className="mt-4 bg-green-900 border border-green-700 rounded-lg p-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-green-400">🔗</span>
-                  <div>
-                    <p className="text-green-100 text-sm font-medium">
-                      Reconciliação Disponível
-                    </p>
-                    <p className="text-green-300 text-xs">
-                      {getAvailableFaturas().length} fatura(s) prontas para reconciliar
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
           </>
         )}
 
@@ -799,5 +773,6 @@ export default function DashboardPage() {
         )}
       </div>
     </div>
+    </ConfigProvider>
   );
 }

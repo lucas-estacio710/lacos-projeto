@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm:*)",
+      "Bash(npm run dev:*)",
+      "Bash(npm run build:*)",
+      "Bash(curl:*)",
+      "Bash(git checkout:*)",
+      "Bash(npx tsx:*)",
+      "Bash(sed:*)",
+      "Bash(del srccomponentsEnhancedUnclassifiedSection_backup.tsx)",
+      "Bash(npx tsc:*)",
+      "Bash(node:*)",
+      "Bash(grep:*)"
+    ],
+    "deny": [],
+    "ask": [],
+    "additionalDirectories": [
+      "C:\\c\\Users\\kel_v\\lacos-projeto"
+    ]
+  }
+}

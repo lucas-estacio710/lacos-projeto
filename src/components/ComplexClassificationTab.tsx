@@ -1,560 +1,525 @@
-// ComplexClassificationTab.tsx - VERSÃO ATUALIZADA COM TIPOS COMPATÍVEIS
+// components/ComplexClassificationTab.tsx - VERSÃO LIMPA COM HIERARCHY MANAGER
 
-import React, { useState, useRef } from 'react';
-import { Upload, FileText, Calendar, Settings, Zap, PlusCircle, CheckCircle, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
-  Transaction,
-  FinancialSheetData,
-  LegacyFinancialSheetData,
-  FinancialEntry,
-  createSummaryFromEntries
-} from '@/types';
+  Target, 
+  TrendingUp, 
+  Cpu, 
+  Edit3,
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  ArrowRight,
+  Edit,
+  X
+} from 'lucide-react';
+import { Transaction } from '@/types';
 import { CardTransaction } from '@/hooks/useCardTransactions';
-import { useFinancialSheet } from '@/hooks/useFinancialSheet';
-import { useUnifiedFinancialData } from '@/hooks/useFinancialSheetCompat';
-import { PixInterConciliationModal } from '@/components/PixInterConciliationModal';
-import { ManualEntryModal } from '@/components/ManualEntryModal';
-import { 
-  formatDateToLocal, 
-  formatDateForDisplay, 
-  parseBrazilianDate 
-} from '@/lib/dateUtils';
-
-// Helper functions para formatação
-const formatCurrency = (value: number): string => {
-  return value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-};
-
-const formatDateSafe = (dateStr: string): string => {
-  try {
-    if (!dateStr || dateStr === '' || dateStr === 'undefined') return 'Data inválida';
-    return formatDateForDisplay(dateStr);
-  } catch {
-    return 'Data inválida';
-  }
-};
+import { UploadPlanilhasSection } from './UploadPlanilhasSection';
+import { usePlanilhaStats } from '@/hooks/usePlanilhaStats';
+import { useEntradasFinanceiras } from '@/hooks/useEntradasFinanceiras';
+import { useAgendaInter } from '@/hooks/useAgendaInter';
+import { PixInterModal } from './PixInterModal';
+import { InterPagModal } from './InterPagModal';
+import { TonModal } from './TonModal';
+import { CremacoesModal } from './CremacoesModal';
+import { ManualEntryModal } from './ManualEntryModal';
+import { supabase } from '@/lib/supabase';
+import { useConfig } from '@/contexts/ConfigContext';
+import { useHierarchy } from '@/hooks/useHierarchy';
+import { prepareClassificationOptions, getTransactionHierarchy } from '@/lib/hierarchyHelpers';
+import { HierarchyManager } from './HierarchyManager';
 
 interface ComplexClassificationTabProps {
-  complexTransactions: Transaction[];
-  complexCardTransactions: CardTransaction[];
-  onEditTransaction: (transaction: Transaction) => void;
-  onEditCardTransaction: (transaction: CardTransaction) => void;
-  onRemoveFromComplex: (transactionId: string, type: 'transaction' | 'card') => Promise<void>;
-  onApplyBatchClassification: (classifications: Array<{
-    id: string;
-    conta: string;
-    categoria: string;
-    subtipo: string;
-    descricao: string;
-  }>) => Promise<void>;
-  // ✅ NOVA PROP PARA RECONCILIAÇÃO
-  onReconcileTransactions?: (reconciliationData: any) => Promise<void>;
+  transactions: Transaction[];
+  cardTransactions: CardTransaction[];
+  historicTransactions: Transaction[];
+  historicCardTransactions: CardTransaction[];
+  addTransactions: (transactions: Transaction[]) => Promise<any>;
+  onTransactionUpdate: (id: string, updates: Partial<Transaction>) => void;
+  onCardTransactionUpdate: (id: string, updates: Partial<CardTransaction>) => void;
+  onTransactionReload: () => void;
+  onCardTransactionReload: () => void;
 }
 
-export function ComplexClassificationTab({
-  complexTransactions,
-  complexCardTransactions,
-  onEditTransaction,
-  onEditCardTransaction,
-  onRemoveFromComplex,
-  onApplyBatchClassification,
-  onReconcileTransactions // ✅ NOVA PROP
-}: ComplexClassificationTabProps) {
-  // Estados dos modais
-  const [showPixInterModal, setShowPixInterModal] = useState(false);
-  const [showManualEntryModal, setShowManualEntryModal] = useState(false);
-  
-  // Estados para upload da planilha
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState<'idle' | 'processing' | 'success' | 'error'>('idle');
-  const [statusMessage, setStatusMessage] = useState('');
-  const [processingProgress, setProcessingProgress] = useState(0);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  
-  // Estados da planilha compatível
-  const [rawSheetData, setRawSheetData] = useState<FinancialSheetData | null>(null);
-  
-  // ✅ USAR HOOK DE COMPATIBILIDADE
-  const unifiedSheetData = useUnifiedFinancialData(rawSheetData);
-  const hasSheetData = !!unifiedSheetData;
+export const ComplexClassificationTab: React.FC<ComplexClassificationTabProps> = ({
+  transactions,
+  cardTransactions,
+  historicTransactions,
+  historicCardTransactions,
+  addTransactions,
+  onTransactionUpdate,
+  onCardTransactionUpdate,
+  onTransactionReload,
+  onCardTransactionReload
+}) => {
+  // ID do subtipo COMPLEXA
+  const COMPLEX_SUBTIPO_ID = 'e92f4f0f-4e94-4007-8945-a1fb47782051';
 
-  // ✅ CONTAR APENAS PIX INTER (NÃO INTERPAG) NÃO CLASSIFICADAS
-  const pixInterCount = complexTransactions.filter(t => {
-    // Verificar se é PIX Inter (origem Inter mas NÃO InterPag)
-    const isPixInter = (
+  // Contadores para as mini aplicações
+  const pixInterCount = useMemo(() => {
+    return transactions.filter(t => 
+      t.subtipo_id === COMPLEX_SUBTIPO_ID &&
+      t.realizado === 'p' &&
       t.origem === 'Inter' &&
-      !t.descricao_origem?.toLowerCase().includes('inter pag')
-    );
-    
-    // Verificar se não está classificada (múltiplas condições possíveis)
-    const isNotClassified = (
-      !t.categoria || 
-      t.categoria === '' || 
-      t.categoria === 'Não Classificado' ||
-      t.categoria === 'Nao Classificado' ||
-      t.categoria.toLowerCase().includes('não classificad') ||
-      t.categoria.toLowerCase().includes('nao classificad') ||
-      (!t.subtipo || t.subtipo === '') ||
-      (t.realizado !== 's' && t.realizado !== 'r') // Não está executada nem reconciliada
-    );
-    
-    return isPixInter && isNotClassified;
-  }).length;
+      !t.descricao_origem?.toLowerCase().includes('inter pag') &&
+      !t.descricao_origem?.toLowerCase().includes('interpag') &&
+      t.valor >= 0 // Apenas valores positivos (receitas)
+    ).length;
+  }, [transactions]);
 
-  const allComplexItems = [
-    ...complexTransactions.map(t => ({ ...t, type: 'transaction' as const })),
-    ...complexCardTransactions.map(c => ({ ...c, type: 'card' as const }))
-  ];
+  const interPagCount = useMemo(() => {
+    return transactions.filter(t => 
+      t.subtipo_id === COMPLEX_SUBTIPO_ID &&
+      t.realizado === 'p' &&
+      t.origem === 'Inter' &&
+      (t.descricao_origem?.toLowerCase().includes('inter pag') ||
+       t.descricao_origem?.toLowerCase().includes('interpag'))
+    ).length;
+  }, [transactions]);
 
-  const totalValue = allComplexItems.reduce((sum, item) => sum + Math.abs(item.valor), 0);
+  const tonCount = useMemo(() => {
+    return transactions.filter(t => 
+      t.subtipo_id === COMPLEX_SUBTIPO_ID &&
+      t.realizado === 'p' &&
+      t.cc === 'Stone'
+    ).length;
+  }, [transactions]);
 
-  // ===== FUNÇÕES PARA UPLOAD DA PLANILHA =====
-  
-  const parseCSVLine = (line: string): string[] => {
-    const result: string[] = [];
-    let current = '';
-    let inQuotes = false;
-    
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i];
-      if (char === '"') {
-        inQuotes = !inQuotes;
-      } else if (char === ',' && !inQuotes) {
-        result.push(current);
-        current = '';
-      } else {
-        current += char;
-      }
+  const cremacoesCount = useMemo(() => {
+    return transactions.filter(t => 
+      t.subtipo_id === COMPLEX_SUBTIPO_ID &&
+      t.realizado === 'p' &&
+      t.valor < 0 // Valores negativos (saídas/gastos)
+    ).length;
+  }, [transactions]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [showPixInterModal, setShowPixInterModal] = useState(false);
+  const [showInterPagModal, setShowInterPagModal] = useState(false);
+  const [showTonModal, setShowTonModal] = useState(false);
+  const [showCremacoesModal, setShowCremacoesModal] = useState(false);
+  const [showManualEntryModal, setShowManualEntryModal] = useState(false);
+
+  const statsHook = usePlanilhaStats();
+  const entradasHook = useEntradasFinanceiras();
+  const agendaHook = useAgendaInter();
+  const config = useConfig();
+
+  // Contadores básicos
+  const totalTransactions = useMemo(() => 
+    transactions.length + cardTransactions.length, 
+    [transactions.length, cardTransactions.length]
+  );
+
+  const classifiedCount = useMemo(() =>
+    transactions.filter(t => t.realizado === 's').length + 
+    cardTransactions.filter(c => c.status === 'classified').length,
+    [transactions, cardTransactions]
+  );
+
+  const unclassifiedCount = totalTransactions - classifiedCount;
+  const classificationPercentage = totalTransactions > 0 ? (classifiedCount / totalTransactions) * 100 : 0;
+
+  // Handlers para modais específicos
+  const handlePixInterClick = useCallback(() => {
+    setShowPixInterModal(true);
+  }, []);
+
+  const handleInterPagClick = useCallback(() => {
+    setShowInterPagModal(true);
+  }, []);
+
+  const handleTonClick = useCallback(() => {
+    setShowTonModal(true);
+  }, []);
+
+  const handleCremacoesClick = useCallback(() => {
+    setShowCremacoesModal(true);
+  }, []);
+
+  const handleManualEntryClick = useCallback(() => {
+    setShowManualEntryModal(true);
+  }, []);
+
+  const handleModalClose = useCallback(() => {
+    setShowPixInterModal(false);
+    setShowInterPagModal(false);
+    setShowTonModal(false);
+    setShowCremacoesModal(false);
+    setShowManualEntryModal(false);
+  }, []);
+
+  // Handlers específicos para cada tipo de modal
+  const handleUploadPlanilhasSuccess = useCallback(() => {
+    // UploadPlanilhas → stats + entradas financeiras
+    if (statsHook.refreshStats) {
+      statsHook.refreshStats();
     }
-    result.push(current);
-    return result.map(v => v.trim().replace(/^"|"$/g, ''));
-  };
+    if (entradasHook.refreshEntradas) {
+      entradasHook.refreshEntradas();
+    }
+  }, [statsHook, entradasHook]);
 
-  const processFinancialCSV = async (csvText: string): Promise<FinancialSheetData> => {
-    const lines = csvText.split('\n');
-    const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
-    
-    console.log('📊 Headers encontrados:', headers);
-    
-    const entries: FinancialEntry[] = [];
-    let processedCount = 0;
-    
-    for (let i = 1; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line) continue;
-      
-      const values = parseCSVLine(line);
-      if (values.length < 20) continue;
-      
-      try {
-        // ✅ USAR FUNÇÃO SEGURA PARA PROCESSAR DATA
-        const rawDate = values[2]?.trim() || ''; // Coluna C
-        const parsedDate = parseBrazilianDate(rawDate);
-        
-        // Processar valor brasileiro da coluna Q (índice 16)
-        const rawValue = values[16]?.trim() || '0'; // Coluna Q - Valor final
-        const parsedValue = parseBrazilianCurrency(rawValue);
-        
-        const entry: FinancialEntry = {
-          id: values[0]?.trim() || `entry_${i}`,
-          idContrato: values[1]?.trim() || '',
-          dataHora: parsedDate, // ✅ DATA PROCESSADA COM FUNÇÃO SEGURA
-          tipo: values[3]?.trim() || '',
-          metodo: values[4]?.trim() || '',
-          cc: values[5]?.trim() || '',
-          valorFinal: parsedValue, // ✅ USAR CAMPO PADRONIZADO
-          idTransacao: values[19]?.trim() || `trans_${i}`, // ✅ CAMPO OBRIGATÓRIO
-        };
-        
-        entries.push(entry);
-        processedCount++;
-        
-        if (processedCount % 100 === 0) {
-          const progress = (processedCount / (lines.length - 1)) * 100;
-          setProcessingProgress(progress);
-          await new Promise(resolve => setTimeout(resolve, 10));
-        }
-        
-      } catch (error) {
-        console.warn('Erro ao processar linha', i, ':', error);
-      }
+  const handlePixInterSuccess = useCallback(() => {
+    // PixInterModal → transações + entradas
+    onTransactionReload();
+    onCardTransactionReload();
+    if (entradasHook.refreshEntradas) {
+      entradasHook.refreshEntradas();
     }
-    
-    // ✅ CRIAR RESUMO USANDO FUNÇÃO PADRONIZADA
-    const summary = createSummaryFromEntries(entries);
-    
-    console.log('✅ Processamento concluído:', {
-      totalEntries: entries.length,
-      dateRange: summary.dateRange,
-      firstEntry: entries[0],
-      lastEntry: entries[entries.length - 1]
-    });
-    
-    return {
-      entries,
-      summary
-    };
-  };
+  }, [onTransactionReload, onCardTransactionReload, entradasHook]);
 
-  // Função para processar moeda brasileira
-  const parseBrazilianCurrency = (valueStr: string): number => {
-    if (!valueStr) return 0;
-    
-    try {
-      // Remover símbolos de moeda e espaços
-      let cleanStr = valueStr.toString()
-        .replace(/R\$|RS/gi, '')
-        .replace(/\s+/g, '')
-        .trim();
-      
-      // Se tem ponto E vírgula: formato brasileiro (1.259,00)
-      if (cleanStr.includes('.') && cleanStr.includes(',')) {
-        // Remover pontos (separadores de milhares) e trocar vírgula por ponto
-        cleanStr = cleanStr.replace(/\./g, '').replace(',', '.');
-      }
-      // Se tem apenas vírgula: decimal brasileiro (259,00)
-      else if (cleanStr.includes(',') && !cleanStr.includes('.')) {
-        cleanStr = cleanStr.replace(',', '.');
-      }
-      // Se tem apenas pontos: verificar se é decimal ou separador de milhares
-      else if (cleanStr.includes('.')) {
-        const parts = cleanStr.split('.');
-        // Se o último grupo tem 2 dígitos, é decimal (1259.00)
-        if (parts[parts.length - 1].length === 2) {
-          // Manter como está (formato americano)
-        } else {
-          // Remover pontos (separadores de milhares: 1.259)
-          cleanStr = cleanStr.replace(/\./g, '');
-        }
-      }
-      
-      const result = parseFloat(cleanStr) || 0;
-      console.log(`💰 Valor convertido: "${valueStr}" → ${result}`);
-      return result;
-      
-    } catch (error) {
-      console.warn(`⚠️ Erro ao converter valor: "${valueStr}"`, error);
-      return 0;
+  const handleInterPagSuccess = useCallback(() => {
+    // InterPagModal → transações + agenda + percentuais 
+    onTransactionReload();
+    onCardTransactionReload();
+    if (statsHook.refreshStats) {
+      statsHook.refreshStats();
     }
-  };
+    if (agendaHook.refreshData) {
+      agendaHook.refreshData();
+    }
+  }, [onTransactionReload, onCardTransactionReload, statsHook, agendaHook]);
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    
-    if (!file.name.toLowerCase().endsWith('.csv')) {
-      setUploadStatus('error');
-      setStatusMessage('⛔ Por favor, selecione um arquivo CSV');
-      return;
+  const handleTonSuccess = useCallback(() => {
+    // TonModal → transações + entradas
+    onTransactionReload();
+    onCardTransactionReload();
+    if (entradasHook.refreshEntradas) {
+      entradasHook.refreshEntradas();
     }
-    
-    setIsUploading(true);
-    setUploadStatus('processing');
-    setStatusMessage('📊 Lendo arquivo...');
-    setProcessingProgress(0);
-    
-    try {
-      const text = await file.text();
-      setStatusMessage('📄 Processando dados...');
-      
-      const data = await processFinancialCSV(text);
-      
-      setStatusMessage('✅ Dados processados com sucesso!');
-      setUploadStatus('success');
-      setProcessingProgress(100);
-      
-      // ✅ ATUALIZAR COM DADOS COMPATÍVEIS
-      setRawSheetData(data);
-      
-      console.log('✅ Upload concluído:', {
-        entries: data.entries.length,
-        dateRange: data.summary.dateRange,
-        totalValue: data.summary.totalValue
-      });
-      
-    } catch (error) {
-      console.error('⛔ Erro no upload:', error);
-      setUploadStatus('error');
-      setStatusMessage('⛔ Erro ao processar arquivo: ' + (error as Error).message);
-    } finally {
-      setIsUploading(false);
-      if (event.target) {
-        event.target.value = '';
-      }
-    }
-  };
+  }, [onTransactionReload, onCardTransactionReload, entradasHook]);
 
-  const handleRemoveFromComplex = async (item: any) => {
-    try {
-      await onRemoveFromComplex(item.id, item.type);
-      alert('✅ Transação removida da Classificação Complexa');
-    } catch (error) {
-      console.error('⛔ Erro ao remover:', error);
-      alert('⛔ Erro ao remover transação');
-    }
-  };
+  const handleCremacoesSuccess = useCallback(() => {
+    // CremacoesModal → transações
+    onTransactionReload();
+    onCardTransactionReload();
+  }, [onTransactionReload, onCardTransactionReload]);
+
+  const handleManualEntrySuccess = useCallback(() => {
+    // ManualEntryModal → transações
+    onTransactionReload();
+    onCardTransactionReload();
+  }, [onTransactionReload, onCardTransactionReload]);
+
+  const [activeSubTab, setActiveSubTab] = useState<'apps' | 'uploads'>('apps');
 
   return (
     <div className="space-y-4">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-orange-600 to-red-600 text-white p-4 rounded-lg shadow-lg">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h2 className="text-xl font-bold flex items-center gap-2">
-              🧩 Classificação Complexa
-            </h2>
-            <p className="text-sm opacity-90 mt-1">
-              Ferramentas avançadas para classificação de transações complexas
-            </p>
-          </div>
-          
-          <div className="text-right">
-            <p className="text-sm opacity-75">PIX Inter Pendentes</p>
-            <p className="text-2xl font-bold">{pixInterCount} transações</p>
-          </div>
-        </div>
-      </div>
-
-      {/* 📊 BARRA DISCRETA: Upload da Planilha Financeira */}
-      <div className="bg-gray-800 border border-gray-700 rounded-lg p-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <FileText className="w-4 h-4 text-gray-400" />
-            <div>
-              {hasSheetData && unifiedSheetData ? (
-                <div>
-                  <p className="text-sm text-gray-200 font-medium">📊 Planilha Financeira</p>
-                  <p className="text-xs text-gray-400">
-                    {unifiedSheetData.summary.totalEntries.toLocaleString()} registros • 
-                    Período: {formatDateForDisplay(unifiedSheetData.summary.dateRange.start)} até {formatDateForDisplay(unifiedSheetData.summary.dateRange.end)}
-                  </p>
-                </div>
-              ) : (
-                <div>
-                  <p className="text-sm text-gray-200">📊 Planilha Financeira</p>
-                  <p className="text-xs text-gray-400">Nenhuma planilha carregada</p>
-                </div>
-              )}
-            </div>
-          </div>
-          
+      {/* Sub-tabs: Aplicações e Planilhas */}
+      <div className="bg-gray-800 rounded-lg border border-gray-700">
+        <div className="flex border-b border-gray-700">
           <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isUploading}
-            className={`px-3 py-1 rounded text-sm transition-colors flex items-center gap-2 ${
-              isUploading 
-                ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
-                : 'bg-blue-600 hover:bg-blue-500 text-white'
+            onClick={() => setActiveSubTab('apps')}
+            className={`flex-1 px-4 py-2 font-medium text-sm transition-colors flex items-center justify-center gap-2 ${
+              activeSubTab === 'apps' 
+                ? 'bg-blue-600 text-white' 
+                : 'text-gray-400 hover:text-white hover:bg-gray-700'
             }`}
           >
-            {isUploading ? (
-              <>
-                <div className="w-3 h-3 border border-blue-400 border-t-transparent rounded-full animate-spin" />
-                <span>Processando...</span>
-              </>
-            ) : (
-              <>
-                <Upload className="w-3 h-3" />
-                <span>{hasSheetData ? 'Atualizar' : 'Carregar'}</span>
-              </>
-            )}
+            📝 Aplicações
           </button>
-
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv"
-            onChange={handleFileUpload}
-            className="hidden"
-            disabled={isUploading}
-          />
+          <button
+            onClick={() => setActiveSubTab('uploads')}
+            className={`flex-1 px-4 py-2 font-medium text-sm transition-colors flex items-center justify-center gap-2 ${
+              activeSubTab === 'uploads' 
+                ? 'bg-blue-600 text-white' 
+                : 'text-gray-400 hover:text-white hover:bg-gray-700'
+            }`}
+          >
+            📤 Planilhas
+          </button>
         </div>
 
-        {/* Status de processamento */}
-        {uploadStatus !== 'idle' && (
-          <div className="mt-2 pt-2 border-t border-gray-700">
-            {uploadStatus === 'processing' && (
-              <div className="space-y-1">
-                <div className="flex items-center gap-2 text-xs text-blue-200">
-                  <div className="w-3 h-3 border border-blue-400 border-t-transparent rounded-full animate-spin" />
-                  {statusMessage}
-                </div>
-                {processingProgress > 0 && (
-                  <div className="w-full bg-gray-700 rounded-full h-1">
-                    <div 
-                      className="bg-blue-400 h-1 rounded-full transition-all duration-300"
-                      style={{ width: `${processingProgress}%` }}
-                    />
+        {/* Tab Content */}
+        <div className="p-4">
+          {activeSubTab === 'apps' && (
+            <div className="space-y-3">
+              <button
+                onClick={handlePixInterClick}
+                className="w-full p-3 bg-purple-900/30 hover:bg-purple-800/50 border border-purple-600 rounded-lg text-left group transition-all"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-purple-300 group-hover:text-purple-200">
+                    <span className="text-lg">🏦</span>
+                    <div className="font-medium text-base">PIX Inter</div>
                   </div>
-                )}
-              </div>
-            )}
-            
-            {uploadStatus === 'success' && (
-              <div className="flex items-center gap-2 text-xs text-green-300">
-                <CheckCircle className="w-3 h-3" />
-                {statusMessage}
-              </div>
-            )}
-            
-            {uploadStatus === 'error' && (
-              <div className="flex items-center gap-2 text-xs text-red-300">
-                <AlertCircle className="w-3 h-3" />
-                {statusMessage}
-              </div>
-            )}
-          </div>
-        )}
-        
-        {/* Informações da planilha carregada */}
-        {hasSheetData && unifiedSheetData && (
-          <div className="mt-2 pt-2 border-t border-gray-700">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-              <div className="bg-gray-700 rounded p-2 text-center">
-                <div className="text-gray-400">Entradas</div>
-                <div className="text-white font-bold">{unifiedSheetData.summary.totalEntries}</div>
-              </div>
-              <div className="bg-gray-700 rounded p-2 text-center">
-                <div className="text-gray-400">Valor Total</div>
-                <div className="text-white font-bold">R$ {formatCurrency(unifiedSheetData.summary.totalValue)}</div>
-              </div>
-              <div className="bg-gray-700 rounded p-2 text-center">
-                <div className="text-gray-400">Métodos</div>
-                <div className="text-white font-bold">{Object.keys(unifiedSheetData.summary.byMethod).length}</div>
-              </div>
-              <div className="bg-gray-700 rounded p-2 text-center">
-                <div className="text-gray-400">Tipos</div>
-                <div className="text-white font-bold">{Object.keys(unifiedSheetData.summary.byType).length}</div>
-              </div>
+                  {pixInterCount > 0 && (
+                    <span className="bg-purple-700 text-purple-200 px-2 py-1 rounded-full text-xs font-semibold">
+                      {pixInterCount}
+                    </span>
+                  )}
+                </div>
+              </button>
+
+              <button
+                onClick={handleInterPagClick}
+                className="w-full p-3 bg-orange-900/30 hover:bg-orange-800/50 border border-orange-600 rounded-lg text-left group transition-all"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-orange-300 group-hover:text-orange-200">
+                    <span className="text-lg">💳</span>
+                    <div className="font-medium text-base">InterPag</div>
+                  </div>
+                  {interPagCount > 0 && (
+                    <span className="bg-orange-700 text-orange-200 px-2 py-1 rounded-full text-xs font-semibold">
+                      {interPagCount}
+                    </span>
+                  )}
+                </div>
+              </button>
+
+              <button
+                onClick={handleTonClick}
+                className="w-full p-3 bg-green-900/30 hover:bg-green-800/50 border border-green-600 rounded-lg text-left group transition-all"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-green-300 group-hover:text-green-200">
+                    <span className="text-lg">⚡</span>
+                    <div className="font-medium text-base">Ton</div>
+                  </div>
+                  {tonCount > 0 && (
+                    <span className="bg-green-700 text-green-200 px-2 py-1 rounded-full text-xs font-semibold">
+                      {tonCount}
+                    </span>
+                  )}
+                </div>
+              </button>
+
+              <button
+                onClick={handleCremacoesClick}
+                className="w-full p-3 bg-yellow-900/30 hover:bg-yellow-800/50 border border-yellow-600 rounded-lg text-left group transition-all"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-yellow-300 group-hover:text-yellow-200">
+                    <span className="text-lg">💛</span>
+                    <div className="font-medium text-base">Cremações</div>
+                  </div>
+                  {cremacoesCount > 0 && (
+                    <span className="bg-yellow-700 text-yellow-200 px-2 py-1 rounded-full text-xs font-semibold">
+                      {cremacoesCount}
+                    </span>
+                  )}
+                </div>
+              </button>
+
+              <button
+                onClick={handleManualEntryClick}
+                className="w-full p-3 bg-gray-900/30 hover:bg-gray-800/50 border border-gray-600 rounded-lg text-left group transition-all"
+              >
+                <div className="flex items-center gap-2 text-gray-300 group-hover:text-gray-200">
+                  <span className="text-lg">✏️</span>
+                  <div className="font-medium text-base">Lançamento Manual</div>
+                </div>
+              </button>
+
+              <button
+                onClick={() => setIsModalOpen(true)}
+                className="w-full p-3 bg-blue-900/30 hover:bg-blue-800/50 border border-blue-600 rounded-lg text-left group transition-all"
+              >
+                <div className="flex items-center gap-2 text-blue-300 group-hover:text-blue-200">
+                  <span className="text-lg">🏗️</span>
+                  <div className="font-medium text-base">Estrutura</div>
+                </div>
+              </button>
             </div>
-          </div>
-        )}
+          )}
+
+          {activeSubTab === 'uploads' && (
+            <UploadPlanilhasSection onStatsUpdate={handleUploadPlanilhasSuccess} />
+          )}
+        </div>
       </div>
 
-      {/* 🎯 MINI-APLICAÇÕES - Layout Original */}
-      <div className="grid grid-cols-2 gap-4">
-        
-        {/* 🟣 PIX INTER - Funcional */}
-        <button
-          onClick={() => setShowPixInterModal(true)}
-          className="bg-gradient-to-br from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white p-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105 cursor-pointer relative group"
-        >
-          <div className="flex flex-col items-center text-center h-full justify-center">
-            <div className="text-4xl mb-3 group-hover:scale-110 transition-transform">
-              🟣
-            </div>
-            <h3 className="font-bold text-lg mb-2">PIX Inter</h3>
-            <p className="text-sm opacity-90 leading-tight">
-              Reconciliação cronológica com planilha
-            </p>
-            <div className="absolute top-2 right-2">
-              {hasSheetData ? (
-                <span className="bg-green-500 text-white px-2 py-1 rounded-full text-xs font-bold">
-                  📊 Pronto
-                </span>
-              ) : (
-                <span className="bg-yellow-500 text-white px-2 py-1 rounded-full text-xs font-bold">
-                  📋 Planilha
-                </span>
-              )}
-            </div>
-            {pixInterCount > 0 && (
-              <div className="absolute top-2 left-2">
-                <span className="bg-orange-500 text-white px-2 py-1 rounded-full text-xs font-bold">
-                  {pixInterCount}
-                </span>
+      {/* Modal Pop-up para Reorganizar (mantido para compatibilidade) */}
+      {isModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-gray-900 rounded-lg border border-blue-600 max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-2xl font-bold text-white">Gerenciar Hierarquia</h2>
+                <button
+                  onClick={() => setIsModalOpen(false)}
+                  className="text-white hover:text-gray-300 transition-colors"
+                >
+                  <X className="w-6 h-6" />
+                </button>
               </div>
-            )}
-          </div>
-        </button>
-
-        {/* 🟠 INTERPAG - Em construção */}
-        <div className="bg-gradient-to-br from-orange-600 to-orange-700 text-white p-6 rounded-xl shadow-lg relative opacity-60 cursor-not-allowed">
-          <div className="flex flex-col items-center text-center h-full justify-center">
-            <div className="text-4xl mb-3">
-              🟠
-            </div>
-            <h3 className="font-bold text-lg mb-2">InterPag</h3>
-            <p className="text-sm opacity-90 leading-tight">
-              Identificação automática de receitas
-            </p>
-            <div className="absolute top-2 right-2">
-              <span className="bg-yellow-600 text-white px-2 py-1 rounded-full text-xs font-bold">
-                🚧 Em breve
-              </span>
+              <HierarchyManager />
             </div>
           </div>
         </div>
+      )}
 
-        {/* 🟢 TON - Em construção */}
-        <div className="bg-gradient-to-br from-green-600 to-green-700 text-white p-6 rounded-xl shadow-lg relative opacity-60 cursor-not-allowed">
-          <div className="flex flex-col items-center text-center h-full justify-center">
-            <div className="text-4xl mb-3">
-              🟢
-            </div>
-            <h3 className="font-bold text-lg mb-2">Ton</h3>
-            <p className="text-sm opacity-90 leading-tight">
-              Processamento de vendas e taxas
-            </p>
-            <div className="absolute top-2 right-2">
-              <span className="bg-yellow-600 text-white px-2 py-1 rounded-full text-xs font-bold">
-                🚧 Em breve
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* ⚪ LANÇAMENTO MANUAL - Funcional */}
-        <button
-          onClick={() => setShowManualEntryModal(true)}
-          className="bg-gradient-to-br from-gray-600 to-gray-700 hover:from-gray-500 hover:to-gray-600 text-white p-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105 cursor-pointer group"
-        >
-          <div className="flex flex-col items-center text-center h-full justify-center">
-            <div className="text-4xl mb-3 group-hover:scale-110 transition-transform">
-              ⚪
-            </div>
-            <h3 className="font-bold text-lg mb-2">Lançamento Manual</h3>
-            <p className="text-sm opacity-90 leading-tight">
-              Criar transação do zero
-            </p>
-          </div>
-        </button>
-      </div>
-
-      {/* ===== MODAIS ===== */}
+      {/* Modais das Mini-Aplicações */}
+      <PixInterModal 
+        isOpen={showPixInterModal} 
+        onClose={handleModalClose}
+        onSuccess={handlePixInterSuccess}
+        complexTransactions={transactions}
+        planilhaEntries={entradasHook.entradas || []}
+        onMarkEntriesAsUsed={entradasHook.markEntriesAsUsed}
+        onApplyReconciliation={async (reconciliationData) => {
+          // Aplicar reconciliação das transações PIX Inter
+          const { originalTransactionIds, newTransactions } = reconciliationData;
+          
+          // 1. Marcar transações originais como reconciliadas
+          for (const id of originalTransactionIds) {
+            onTransactionUpdate(id, { realizado: 'r' });
+          }
+          
+          // 2. Criar novos lançamentos no Supabase (com user_id)
+          if (newTransactions.length > 0) {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) throw new Error('Usuário não autenticado');
+            
+            // Adicionar user_id às transações
+            const transactionsWithUser = newTransactions.map(t => ({
+              ...t,
+              user_id: user.id
+            }));
+            
+            const { error } = await supabase
+              .from('transactions')
+              .insert(transactionsWithUser);
+            
+            if (error) {
+              console.error('Erro ao criar novos lançamentos:', error);
+              throw error;
+            }
+          }
+          
+          // 3. Recarregar dados
+          onTransactionReload();
+        }}
+      />
       
-      {/* Modal PIX Inter */}
-      <PixInterConciliationModal
-        isOpen={showPixInterModal}
-        onClose={() => setShowPixInterModal(false)}
-        complexTransactions={complexTransactions}
-        sheetData={unifiedSheetData} // ✅ PASSA DADOS UNIFICADOS
-        onApplyClassification={onApplyBatchClassification}
-        onReconcileTransactions={onReconcileTransactions} // ✅ NOVA FUNÇÃO
+      <InterPagModal 
+        isOpen={showInterPagModal} 
+        onClose={handleModalClose}
+        onSuccess={handleInterPagSuccess}
+        complexTransactions={transactions}
+        agendaEntries={agendaHook.agendaEntries}
+        percentuaisEntries={agendaHook.percentuaisEntries}
+        onApplyReconciliation={async (reconciliationData) => {
+          // Aplicar reconciliação das transações InterPag
+          const { originalTransactionIds, newTransactions } = reconciliationData;
+          
+          // 1. Marcar transações originais como reconciliadas
+          for (const id of originalTransactionIds) {
+            onTransactionUpdate(id, { realizado: 'r' });
+          }
+          
+          // 2. Criar novos lançamentos no Supabase (precisa usar nova hierarquia)
+          if (newTransactions.length > 0) {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) throw new Error('Usuário não autenticado');
+            
+            // Adicionar user_id às transações (InterPag ainda usa sistema antigo)
+            const transactionsWithUser = newTransactions.map(t => ({
+              ...t,
+              user_id: user.id
+            }));
+            
+            const { error } = await supabase
+              .from('transactions')
+              .insert(transactionsWithUser);
+            
+            if (error) {
+              console.error('Erro ao criar novos lançamentos InterPag:', error);
+              throw error;
+            }
+          }
+          
+          // 3. Recarregar dados
+          onTransactionReload();
+        }}
       />
-
-      {/* Modal Lançamento Manual */}
-      <ManualEntryModal
-        isOpen={showManualEntryModal}
-        onClose={() => setShowManualEntryModal(false)}
+      
+      <TonModal 
+        isOpen={showTonModal} 
+        onClose={handleModalClose}
+        onSuccess={handleTonSuccess}
+        complexTransactions={transactions}
+        planilhaEntries={entradasHook.entradas || []}
+        onApplyReconciliation={async (reconciliationData) => {
+          // Aplicar reconciliação das transações TON
+          const { originalTransactionIds, newTransactions } = reconciliationData;
+          
+          // 1. Marcar transações originais como reconciliadas
+          for (const id of originalTransactionIds) {
+            onTransactionUpdate(id, { realizado: 'r' });
+          }
+          
+          // 2. Criar novos lançamentos no Supabase (com user_id)
+          if (newTransactions.length > 0) {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) throw new Error('Usuário não autenticado');
+            
+            // Adicionar user_id às transações
+            const transactionsWithUser = newTransactions.map(t => ({
+              ...t,
+              user_id: user.id
+            }));
+            
+            const { error } = await supabase
+              .from('transactions')
+              .insert(transactionsWithUser);
+            
+            if (error) throw error;
+          }
+        }}
+        onMarkEntriesAsUsed={entradasHook.markEntriesAsUsed}
       />
-
-      {/* Informações sobre desenvolvimento */}
-      <div className="bg-blue-900 border border-blue-700 rounded-lg p-4">
-        <h4 className="font-medium text-blue-100 mb-2">🚀 Status das Mini-Aplicações</h4>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-blue-200">
-          <div>✅ PIX Inter: Reconciliação cronológica com calendário</div>
-          <div>✅ Lançamento Manual: Formulário completo</div>
-          <div>🚧 InterPag: Identificação automática (em breve)</div>
-          <div>🚧 Ton: Processamento de vendas (em breve)</div>
-        </div>
-        <div className="mt-3 pt-3 border-t border-blue-700">
-          <p className="text-xs text-blue-300">
-            💡 Use o PIX Inter para reconciliar transações em ordem cronológica. 
-            O sistema mostra um calendário linear e exige match perfeito de valores por dia.
-          </p>
-        </div>
-      </div>
+      
+      <CremacoesModal 
+        isOpen={showCremacoesModal} 
+        onClose={handleModalClose}
+        onSuccess={handleCremacoesSuccess}
+        complexTransactions={transactions}
+        onApplyReconciliation={async (reconciliationData) => {
+          const { originalTransactionIds, newTransactions, reconciliationNote, reconciliationMetadata } = reconciliationData;
+          
+          // Obter user para RLS
+          const { data: { user } } = await supabase.auth.getUser();
+          
+          // Criar novas transações usando addTransactions
+          await addTransactions(newTransactions.map((t: any) => ({
+            ...t,
+            user_id: user?.id // Adicionar user_id para RLS
+          })));
+          
+          // Marcar transações originais como reconciliadas
+          for (const id of originalTransactionIds) {
+            onTransactionUpdate(id, { 
+              realizado: 'r' // Marcar como reconciliada
+            });
+          }
+          
+          console.log(`✅ Reconciliação Cremação: ${reconciliationNote}`, reconciliationMetadata);
+          
+          // Recarregar dados
+          onTransactionReload();
+        }}
+        onMarkTransactionsAsReconciled={async (transactionIds) => {
+          // Callback adicional para marcação específica se necessário
+          for (const id of transactionIds) {
+            onTransactionUpdate(id, { 
+              realizado: 'r'
+            });
+          }
+          
+          console.log(`✅ Transações marcadas como reconciliadas:`, transactionIds);
+        }}
+      />
+      
+      <ManualEntryModal 
+        isOpen={showManualEntryModal} 
+        onClose={handleModalClose}
+        onSuccess={handleManualEntrySuccess}
+      />
     </div>
   );
-}
+};
+
+export default ComplexClassificationTab;

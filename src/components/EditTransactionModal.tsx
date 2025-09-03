@@ -27,6 +27,7 @@ export function EditTransactionModal({
 }: EditTransactionModalProps) {
   const { getAllAccountTypes } = useConfig();
   const { contas, categorias, subtipos, carregarTudo } = useHierarchy();
+  const [isProcessing, setIsProcessing] = useState(false);
   
   // Load hierarchy data when modal opens
   useEffect(() => {
@@ -54,6 +55,52 @@ export function EditTransactionModal({
     subtipo: '',
     descricao: ''
   });
+  
+  // Estado para busca de subtipo
+  const [searchSubtipo, setSearchSubtipo] = useState('');
+  
+  // Buscar subtipos por nome (todos os subtipos ativos)
+  const allSubtipos = useMemo(() => {
+    return subtipos
+      .filter(s => s.ativo && !isClassificacaoComplexa(s.id))
+      .map(s => {
+        const categoria = categorias.find(c => c.id === s.categoria_id);
+        const conta = categoria ? contas.find(c => c.id === categoria.conta_id) : null;
+        return {
+          id: s.id,
+          nome: s.nome,
+          categoria_nome: categoria?.nome || '',
+          conta_codigo: conta?.codigo || '',
+          conta_nome: conta?.nome || '',
+          caminho_completo: `${conta?.codigo || ''} > ${categoria?.nome || ''} > ${s.nome}`
+        };
+      });
+  }, [contas, categorias, subtipos]);
+  
+  // Filtrar subtipos baseado na busca
+  const filteredSubtipos = useMemo(() => {
+    if (!searchSubtipo.trim()) return [];
+    
+    const search = searchSubtipo.toLowerCase().trim();
+    return allSubtipos
+      .filter(s => 
+        s.nome.toLowerCase().includes(search) ||
+        s.categoria_nome.toLowerCase().includes(search) ||
+        s.conta_nome.toLowerCase().includes(search)
+      )
+      .slice(0, 8); // Limitar a 8 resultados
+  }, [allSubtipos, searchSubtipo]);
+  
+  // Aplicar classificação direta ao selecionar subtipo da busca
+  const handleSubtipoSelect = (subtipo: any) => {
+    setEditForm({
+      conta: subtipo.conta_codigo,
+      categoria: subtipo.categoria_nome,
+      subtipo: subtipo.nome,
+      descricao: editForm.descricao || transaction?.descricao_origem || ''
+    });
+    setSearchSubtipo(''); // Limpar busca
+  };
 
   useEffect(() => {
     if (transaction) {
@@ -136,28 +183,35 @@ export function EditTransactionModal({
       .map(s => s.nome);
   }, [contas, categorias, subtipos, editForm.conta, editForm.categoria]);
 
-  const handleSaveClick = () => {
+  const handleSaveClick = async () => {
     if (transaction && editForm.conta && editForm.categoria && editForm.subtipo && editForm.descricao) {
-      // ✅ Find subtipo_id for new hierarchy system
-      const selectedConta = contas.find(c => c.codigo === editForm.conta);
-      const selectedCategoria = categorias.find(c => 
-        c.conta_id === selectedConta?.id && c.nome === editForm.categoria
-      );
-      const selectedSubtipo = subtipos.find(s => 
-        s.categoria_id === selectedCategoria?.id && s.nome === editForm.subtipo
-      );
+      setIsProcessing(true);
       
-      const updatedTransaction: Transaction = {
-        ...transaction,
-        conta: editForm.conta,
-        categoria: editForm.categoria,
-        subtipo: editForm.subtipo,
-        subtipo_id: selectedSubtipo?.id, // ✅ Add subtipo_id for new hierarchy
-        descricao: editForm.descricao,
-        realizado: 's'
-      };
-      onSave(updatedTransaction);
-      onClose();
+      try {
+        // ✅ Find subtipo_id for new hierarchy system
+        const selectedConta = contas.find(c => c.codigo === editForm.conta);
+        const selectedCategoria = categorias.find(c => 
+          c.conta_id === selectedConta?.id && c.nome === editForm.categoria
+        );
+        const selectedSubtipo = subtipos.find(s => 
+          s.categoria_id === selectedCategoria?.id && s.nome === editForm.subtipo
+        );
+        
+        const updatedTransaction: Transaction = {
+          ...transaction,
+          conta: editForm.conta,
+          categoria: editForm.categoria,
+          subtipo: editForm.subtipo,
+          subtipo_id: selectedSubtipo?.id || '', // ✅ Add subtipo_id for new hierarchy
+          descricao: editForm.descricao,
+          realizado: 's'
+        };
+        
+        await onSave(updatedTransaction);
+        onClose();
+      } finally {
+        setIsProcessing(false);
+      }
     }
   };
 
@@ -224,9 +278,44 @@ export function EditTransactionModal({
           
             {/* Formulário de classificação - design moderno */}
             <div className="space-y-3">
-              <h4 className="text-sm font-medium text-gray-300 flex items-center gap-2">
-                📋 Classificação
-              </h4>
+              {/* Header com busca rápida */}
+              <div className="flex items-center justify-between gap-3">
+                <h4 className="text-sm font-medium text-gray-300 flex items-center gap-2">
+                  📋 Classificação
+                </h4>
+                
+                {/* Campo de busca de subtipo */}
+                <div className="flex-1 max-w-xs relative">
+                  <input
+                    type="text"
+                    value={searchSubtipo}
+                    onChange={(e) => setSearchSubtipo(e.target.value)}
+                    placeholder="Buscar subtipo..."
+                    autoFocus
+                    className="w-full p-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-100 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
+                  />
+                  
+                  {/* Dropdown de resultados */}
+                  {filteredSubtipos.length > 0 && (
+                    <div className="absolute top-full left-0 right-0 mt-1 bg-gray-700 border border-gray-600 rounded-lg shadow-xl z-10 max-h-60 overflow-y-auto">
+                      {filteredSubtipos.map((subtipo) => (
+                        <button
+                          key={subtipo.id}
+                          onClick={() => handleSubtipoSelect(subtipo)}
+                          className="w-full text-left p-3 hover:bg-gray-600 transition-colors border-b border-gray-600 last:border-b-0"
+                        >
+                          <div className="text-sm text-gray-100 font-medium">
+                            {subtipo.nome}
+                          </div>
+                          <div className="text-xs text-gray-400">
+                            {subtipo.caminho_completo}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
               
               {/* Conta */}
               <div>
@@ -309,9 +398,34 @@ export function EditTransactionModal({
           
         {/* Footer com botões - sticky no bottom */}
         <div className="bg-gray-900 border-t border-gray-700 p-4">
-          {/* Linha 1: Ações secundárias */}
+          {/* Linha 1: Ações principais */}
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              onClick={onClose}
+              className="py-3 px-4 bg-gray-600 hover:bg-gray-500 text-white rounded-lg transition-colors font-medium"
+            >
+              Cancelar
+            </button>
+            
+            <button
+              onClick={handleSaveClick}
+              className="py-3 px-4 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 disabled:opacity-50 text-white rounded-lg transition-colors font-medium flex items-center justify-center gap-2"
+              disabled={!editForm.conta || !editForm.categoria || !editForm.subtipo || !editForm.descricao || isProcessing}
+            >
+              {isProcessing ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                  Reclassificando...
+                </>
+              ) : (
+                '💾 Salvar'
+              )}
+            </button>
+          </div>
+          
+          {/* Linha 2: Ações secundárias */}
           {(onSplit && !isReconciled) || (onReconcile && canReconcile && !isReconciled) ? (
-            <div className="grid grid-cols-2 gap-2 mb-3">
+            <div className="grid grid-cols-2 gap-2 mt-3">
               {onSplit && !isReconciled && (
                 <button
                   onClick={() => {
@@ -330,31 +444,13 @@ export function EditTransactionModal({
                     onReconcile(transaction);
                     onClose();
                   }}
-                  className="flex items-center justify-center gap-2 py-2.5 px-3 bg-green-600 hover:bg-green-500 text-white rounded-lg transition-colors text-sm font-medium"
+                  className="flex items-center justify-center gap-2 py-2.5 px-3 bg-orange-600 hover:bg-orange-500 text-white rounded-lg transition-colors text-sm font-medium"
                 >
                   🔗 <span className="hidden sm:inline">Reconciliar</span>
                 </button>
               )}
             </div>
           ) : null}
-          
-          {/* Linha 2: Ações principais */}
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              onClick={onClose}
-              className="py-3 px-4 bg-gray-600 hover:bg-gray-500 text-white rounded-lg transition-colors font-medium"
-            >
-              Cancelar
-            </button>
-            
-            <button
-              onClick={handleSaveClick}
-              className="py-3 px-4 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 disabled:opacity-50 text-white rounded-lg transition-colors font-medium flex items-center justify-center gap-2"
-              disabled={!editForm.conta || !editForm.categoria || !editForm.subtipo || !editForm.descricao}
-            >
-              💾 Salvar
-            </button>
-          </div>
         </div>
       </div>
     </div>
@@ -401,18 +497,38 @@ export function EditCardTransactionModal({
   });
 
   useEffect(() => {
-    if (transaction) {
-      // Determinar conta baseada na categoria existente
-      const conta = getAccountFromCategory(transaction.categoria || '');
-      
+    if (transaction && transaction.subtipo_id) {
+      // Find existing classification from subtipo_id
+      const subtipo = subtipos.find(s => s.id === transaction.subtipo_id);
+      if (subtipo) {
+        const categoria = categorias.find(c => c.id === subtipo.categoria_id);
+        const conta = categoria ? contas.find(c => c.id === categoria.conta_id) : null;
+        
+        setEditForm({
+          conta: conta?.codigo || '',
+          categoria: categoria?.nome || '',
+          subtipo: subtipo.nome,
+          descricao_classificada: transaction.descricao_classificada || transaction.descricao_origem || ''
+        });
+      } else {
+        // No existing classification
+        setEditForm({
+          conta: '',
+          categoria: '',
+          subtipo: '',
+          descricao_classificada: transaction.descricao_classificada || transaction.descricao_origem || ''
+        });
+      }
+    } else if (transaction) {
+      // No subtipo_id
       setEditForm({
-        conta: conta,
-        categoria: transaction.categoria || '',
-        subtipo: transaction.subtipo || '',
+        conta: '',
+        categoria: '',
+        subtipo: '',
         descricao_classificada: transaction.descricao_classificada || transaction.descricao_origem || ''
       });
     }
-  }, [transaction]);
+  }, [transaction, contas, categorias, subtipos]);
 
 
   const formatCurrency = (value: number) => {
@@ -478,9 +594,27 @@ export function EditCardTransactionModal({
       .filter(s => s.categoria_id === selectedCategoria.id && s.ativo && !isClassificacaoComplexa(s.id))
       .map(s => s.nome);
   }, [contas, categorias, subtipos, editForm.conta, editForm.categoria]);
+  
+  // Get current classification details for display
+  const currentClassification = useMemo(() => {
+    if (!transaction?.subtipo_id) return null;
+    
+    const subtipo = subtipos.find(s => s.id === transaction.subtipo_id);
+    if (!subtipo) return null;
+    
+    const categoria = categorias.find(c => c.id === subtipo.categoria_id);
+    const conta = categoria ? contas.find(c => c.id === categoria.conta_id) : null;
+    
+    return {
+      conta_codigo: conta?.codigo || '',
+      categoria_nome: categoria?.nome || '',
+      subtipo_nome: subtipo.nome,
+      caminho_completo: `${conta?.codigo || ''} > ${categoria?.nome || ''} > ${subtipo.nome}`
+    };
+  }, [transaction?.subtipo_id, contas, categorias, subtipos]);
 
   const handleSaveClick = () => {
-    if (transaction && editForm.categoria && editForm.subtipo && editForm.descricao_classificada) {
+    if (transaction && editForm.conta && editForm.categoria && editForm.subtipo && editForm.descricao_classificada) {
       // ✅ Find subtipo_id for new hierarchy system
       const selectedConta = contas.find(c => c.codigo === editForm.conta);
       const selectedCategoria = categorias.find(c => 
@@ -492,11 +626,9 @@ export function EditCardTransactionModal({
       
       const updatedTransaction: CardTransaction = {
         ...transaction,
-        categoria: editForm.categoria,
-        subtipo: editForm.subtipo,
-        subtipo_id: selectedSubtipo?.id, // ✅ Add subtipo_id for new hierarchy
+        subtipo_id: selectedSubtipo?.id || '',
         descricao_classificada: editForm.descricao_classificada,
-        status: 'classified' // Marcar como classificada
+        status: 'classified'
       };
       onSave(updatedTransaction);
       onClose();
@@ -573,11 +705,11 @@ export function EditCardTransactionModal({
             </div>
 
             {/* Classificação atual (se houver) */}
-            {transaction.categoria && (
+            {currentClassification && (
               <div className="bg-gray-700 rounded p-2">
                 <p className="text-xs text-gray-400 mb-1">Classificação Atual:</p>
                 <p className="text-sm text-gray-200">
-                  {transaction.categoria} → {transaction.subtipo}
+                  {currentClassification.caminho_completo}
                 </p>
                 {transaction.descricao_classificada && (
                   <p className="text-xs text-gray-300 mt-1">
@@ -685,8 +817,8 @@ export function EditCardTransactionModal({
               {canEdit ? 'Cancelar' : 'Fechar'}
             </button>
             
-            {/* ✅ NOVO BOTÃO: Dividir para cartões */}
-            {canSplit && (
+            {/* ✅ BOTÃO: Dividir transação */}
+            {canEdit && onSplit && (
               <button
                 onClick={() => {
                   onSplit(transaction);
@@ -701,10 +833,17 @@ export function EditCardTransactionModal({
             {canEdit && (
               <button
                 onClick={handleSaveClick}
-                className="flex-1 py-2 px-4 bg-green-600 hover:bg-green-500 text-white rounded transition-colors font-medium"
-                disabled={!editForm.categoria || !editForm.subtipo || !editForm.descricao_classificada}
+                className="flex-1 py-2 px-4 bg-green-600 hover:bg-green-500 disabled:bg-gray-600 disabled:opacity-50 text-white rounded transition-colors font-medium flex items-center justify-center gap-2"
+                disabled={!editForm.conta || !editForm.categoria || !editForm.subtipo || !editForm.descricao_classificada || isProcessing}
               >
-                💾 Salvar Classificação
+                {isProcessing ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                    Reclassificando...
+                  </>
+                ) : (
+                  '💾 Salvar Classificação'
+                )}
               </button>
             )}
           </div>

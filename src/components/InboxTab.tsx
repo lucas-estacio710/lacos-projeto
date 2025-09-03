@@ -50,13 +50,20 @@ export function InboxTab({
     conta: string;
     categoria: string;
     subtipo: string;
+    customDescriptions?: Record<string, string>;
   }) => {
     // Converter do formato do EnhancedUnclassifiedSection para o formato esperado pelo InboxTab
-    const classifications = transactions.selectedIds.map(id => ({
-      id,
-      subtipo_id: transactions.subtipo, // Assumindo que subtipo é o subtipo_id
-      descricao: '' // Adicionar descrição se necessário
-    }));
+    const classifications = transactions.selectedIds.map(id => {
+      // Encontrar a transação para pegar descricao_origem como fallback
+      const transaction = filteredTransactions.find(t => t.id === id) || 
+                         filteredCards.find(c => c.id === id);
+      
+      return {
+        id,
+        subtipo_id: transactions.subtipo, // Assumindo que subtipo é o subtipo_id
+        descricao: transactions.customDescriptions?.[id] || transaction?.descricao_origem || '' // Usar descrição customizada ou fallback para descricao_origem
+      };
+    });
     
     await onApplyBatchClassification(classifications);
   };

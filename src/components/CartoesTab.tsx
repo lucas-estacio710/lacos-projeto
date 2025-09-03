@@ -97,7 +97,7 @@ export function CartoesTab({
       return categoria?.icone || '📁';
     };
   }, [contas, categorias]);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('todos'); // ⭐ FORÇA MOSTRAR TUDO
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('aberto'); // ⭐ PADRÃO: ABA ABERTO
   const [selectedCartao, setSelectedCartao] = useState('todos');
   const [selectedMes, setSelectedMes] = useState('todos');
   const [searchTerm, setSearchTerm] = useState('');

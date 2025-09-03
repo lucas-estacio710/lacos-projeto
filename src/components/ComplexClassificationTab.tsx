@@ -345,7 +345,10 @@ export const ComplexClassificationTab: React.FC<ComplexClassificationTabProps> =
                   <X className="w-6 h-6" />
                 </button>
               </div>
-              <HierarchyManager />
+              <HierarchyManager 
+                isOpen={true}
+                onClose={() => setIsModalOpen(false)}
+              />
             </div>
           </div>
         </div>

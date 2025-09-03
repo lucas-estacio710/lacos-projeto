@@ -11,7 +11,11 @@
       "Bash(del srccomponentsEnhancedUnclassifiedSection_backup.tsx)",
       "Bash(npx tsc:*)",
       "Bash(node:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(npx next:*)",
+      "Bash(git restore:*)",
+      "Bash(npm install:*)",
+      "Bash(git add:*)"
     ],
     "deny": [],
     "ask": [],

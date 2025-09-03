@@ -62,6 +62,7 @@ export interface CreateContaRequest {
 }
 
 export interface UpdateContaRequest {
+  codigo?: string;
   nome?: string;
   icone?: string;
   ordem_exibicao?: number;
@@ -77,8 +78,10 @@ export interface CreateCategoriaRequest {
 }
 
 export interface UpdateCategoriaRequest {
+  codigo?: string;
   nome?: string;
   icone?: string;
+  conta_id?: string;
   ordem_exibicao?: number;
   ativo?: boolean;
 }
@@ -94,8 +97,10 @@ export interface CreateSubtipoRequest {
 }
 
 export interface UpdateSubtipoRequest {
+  codigo?: string;
   nome?: string;
   icone?: string;
+  categoria_id?: string;
   ordem_exibicao?: number;
   ativo?: boolean;
   categoria_rapida?: boolean;

@@ -353,12 +353,12 @@ export function OverviewTab({
   const classifiedTransactions = getFilteredTransactions();
   
   // Debug classified transactions
-  // console.log('🔍 Classified transactions:', classifiedTransactions.length);
-  // console.log('🔍 Classified CONC:', classifiedTransactions.filter(t => getTransactionAccount(t) === 'CONC').length);
-  // console.log('🔍 Classified OUTRAS:', classifiedTransactions.filter(t => getTransactionAccount(t) === 'OUTRAS').length);
-  // console.log('🔍 Classified PJ:', classifiedTransactions.filter(t => getTransactionAccount(t) === 'PJ').length);
-  // console.log('🔍 Classified PF:', classifiedTransactions.filter(t => getTransactionAccount(t) === 'PF').length);
-  // console.log('🔍 TODAS as contas encontradas:', [...new Set(classifiedTransactions.map(t => getTransactionAccount(t)))]);
+  console.log('🔍 Classified transactions:', classifiedTransactions.length);
+  console.log('🔍 Classified CONC:', classifiedTransactions.filter(t => getTransactionAccount(t) === 'CONC').length);
+  console.log('🔍 Classified OUTRAS:', classifiedTransactions.filter(t => getTransactionAccount(t) === 'OUTRAS').length);
+  console.log('🔍 Classified PJ:', classifiedTransactions.filter(t => getTransactionAccount(t) === 'PJ').length);
+  console.log('🔍 Classified PF:', classifiedTransactions.filter(t => getTransactionAccount(t) === 'PF').length);
+  console.log('🔍 TODAS as contas encontradas:', [...new Set(classifiedTransactions.map(t => getTransactionAccount(t)))]);
 
   // ===== OBTER INFORMAÇÕES DO PERÍODO SELECIONADO =====
   const getSelectedPeriodInfo = () => {
@@ -436,9 +436,46 @@ export function OverviewTab({
       {/* Filtros Compactos em Cascata */}
       <div className="bg-gray-800 p-4 rounded-lg shadow-lg border border-gray-700">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-gray-100 flex items-center gap-2">
+          <h3 className="text-sm sm:text-base font-medium text-gray-100 flex items-center gap-2">
             <Calendar className="w-5 h-5 text-blue-400" />
-            Período
+            {(() => {
+              // Se for todos os períodos
+              if (selectedPeriod === 'todos') {
+                return 'Todos';
+              }
+              
+              // Se for um ano (formato "2024-YEAR")
+              if (selectedPeriod.endsWith('-YEAR')) {
+                const year = selectedPeriod.split('-')[0];
+                return year;
+              }
+              
+              // Se for um semestre (formato "2024-S1" ou "2024-S2")
+              if (selectedPeriod.includes('-S')) {
+                const [year, semester] = selectedPeriod.split('-S');
+                return `${semester === '1' ? '1º' : '2º'}Sem/${year}`;
+              }
+              
+              // Se for um trimestre (formato "2024-Q1", "2024-Q2", etc)
+              if (selectedPeriod.includes('-Q')) {
+                const [year, quarter] = selectedPeriod.split('-Q');
+                return `${quarter}ºTri/${year}`;
+              }
+              
+              // Se for um mês específico (formato "2409" = setembro/24)
+              if (selectedPeriod.length === 4 && /^\d{4}$/.test(selectedPeriod)) {
+                const year = '20' + selectedPeriod.substring(0, 2);
+                const month = parseInt(selectedPeriod.substring(2, 4));
+                const monthNames = [
+                  'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
+                  'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'
+                ];
+                return `${monthNames[month - 1]}/${year}`;
+              }
+              
+              // Fallback
+              return 'Período';
+            })()}
           </h3>
           <div className="flex gap-2">
             <button
@@ -455,6 +492,34 @@ export function OverviewTab({
               }`}
             >
               Todos
+            </button>
+            <button
+              onClick={() => {
+                const now = new Date();
+                const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                const lastMonthYear = lastMonth.getFullYear().toString().slice(-2);
+                const lastMonthMonth = (lastMonth.getMonth() + 1).toString().padStart(2, '0');
+                const lastMonthPeriod = lastMonthYear + lastMonthMonth;
+                
+                setSelectedPeriod(lastMonthPeriod);
+                setSelectedYear('20' + lastMonthYear);
+                setSelectedSemester('');
+                setSelectedQuarter('');
+              }}
+              className={`px-3 py-1 rounded text-sm font-medium transition-all ${
+                (() => {
+                  const now = new Date();
+                  const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                  const lastMonthYear = lastMonth.getFullYear().toString().slice(-2);
+                  const lastMonthMonth = (lastMonth.getMonth() + 1).toString().padStart(2, '0');
+                  const lastMonthPeriod = lastMonthYear + lastMonthMonth;
+                  return selectedPeriod === lastMonthPeriod;
+                })()
+                  ? 'bg-orange-600 text-white'
+                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              }`}
+            >
+              Anter.
             </button>
             <button
               onClick={() => {
@@ -486,9 +551,8 @@ export function OverviewTab({
             {/* Botão para mostrar/esconder filtros avançados */}
             <button
               onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-              className="px-3 py-1 rounded text-sm font-medium transition-all bg-purple-600 text-white hover:bg-purple-500 flex items-center gap-1"
+              className="px-3 py-1 rounded text-sm font-medium transition-all bg-purple-600 text-white hover:bg-purple-500 flex items-center"
             >
-              {showAdvancedFilters ? 'Ocultar' : 'Mais'}
               {showAdvancedFilters ? 
                 <ChevronUp className="w-4 h-4" /> : 
                 <ChevronDown className="w-4 h-4" />
@@ -610,7 +674,7 @@ export function OverviewTab({
                           setSelectedPeriod(quarterId);
                         }
                       }}
-                      disabled={!selectedYear || (selectedSemester && !isQuarterHighlighted(q))}
+                      disabled={!selectedYear || (selectedSemester ? !isQuarterHighlighted(q) : false)}
                       className={`px-3 py-1 rounded text-sm font-medium transition-all ${
                         isActive
                           ? 'bg-purple-600 text-white'
@@ -648,7 +712,7 @@ export function OverviewTab({
                         if (!selectedYear) return; // Precisa de ano selecionado
                         setSelectedPeriod(monthId);
                       }}
-                      disabled={!selectedYear || ((selectedSemester || selectedQuarter) && !isMonthHighlighted(monthName))}
+                      disabled={!selectedYear || ((selectedSemester || selectedQuarter) ? !isMonthHighlighted(monthName) : false)}
                       className={`px-3 py-1 rounded text-sm font-medium transition-all ${
                         isActive
                           ? 'bg-blue-600 text-white'

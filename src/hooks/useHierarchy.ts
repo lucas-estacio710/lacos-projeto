@@ -291,7 +291,6 @@ export function useHierarchy() {
 
       if (error) throw error;
 
-      console.log('✅ Categoria atualizada:', categoriaAtualizada);
       await carregarTudo();
       return categoriaAtualizada;
     } catch (err) {

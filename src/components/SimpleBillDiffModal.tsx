@@ -1,8 +1,9 @@
-// components/SimpleBillDiffModal.tsx - REBUILD COMPLETO COM CÁLCULOS CORRIGIDOS
+// components/SimpleBillDiffModal.tsx - VERSÃO REORGANIZADA COM 2 BLOCOS
 
 import React, { useState, useEffect } from 'react';
 import { CardTransaction } from '@/hooks/useCardTransactions';
 import { formatCurrency, formatDate } from '@/lib/utils';
+import { Check, X } from 'lucide-react';
 
 export interface BillChanges {
   toAdd: CardTransaction[];    // Novas transações para criar
@@ -18,7 +19,7 @@ interface SimpleBillDiffModalProps {
   onClose: () => void;
   onApply: (changes: BillChanges) => void;
   onCancel: () => void;
-  onReplaceAll?: () => void; // ✅ NOVA PROP: Callback para substituir tudo
+  onReplaceAll?: () => void;
 }
 
 interface DiffItem {
@@ -38,36 +39,41 @@ export function SimpleBillDiffModal({
   onClose,
   onApply,
   onCancel,
-  onReplaceAll // ✅ NOVA PROP
+  onReplaceAll
 }: SimpleBillDiffModalProps) {
   const [leftItems, setLeftItems] = useState<DiffItem[]>([]);   // Coluna da esquerda (existentes)
   const [rightItems, setRightItems] = useState<DiffItem[]>([]); // Coluna da direita (novas)
-  const [selectAllLeft, setSelectAllLeft] = useState(false);
-  const [selectAllRight, setSelectAllRight] = useState(true);   // Por padrão, selecionar todas as novas
+  const [existingTab, setExistingTab] = useState<'matched' | 'unmatched'>('matched');
+  const [newTab, setNewTab] = useState<'matched' | 'unmatched'>('unmatched');
 
   // ===== FUNÇÃO PARA CALCULAR SIMILARIDADE =====
   const calculateSimilarity = (t1: CardTransaction, t2: CardTransaction): number => {
     let score = 0;
-    
-    // Mesma data (peso 3)
-    if (t1.data_transacao === t2.data_transacao) score += 3;
-    
-    // Mesmo valor absoluto (peso 4)
-    if (Math.abs(Math.abs(t1.valor) - Math.abs(t2.valor)) < 0.01) score += 4;
-    
-    // Descrição similar (peso 3)
-    const desc1 = t1.descricao_origem.toLowerCase();
-    const desc2 = t2.descricao_origem.toLowerCase();
-    if (desc1 === desc2) {
-      score += 3;
-    } else if (desc1.includes(desc2.substring(0, 10)) || desc2.includes(desc1.substring(0, 10))) {
-      score += 2;
+
+    // Similaridade de data (peso: 0.3)
+    if (t1.data_transacao === t2.data_transacao) {
+      score += 0.3;
     }
+
+    // Similaridade de valor (peso: 0.4)
+    if (Math.abs(t1.valor - t2.valor) < 0.01) {
+      score += 0.4;
+    }
+
+    // Similaridade de descrição (peso: 0.3)
+    const desc1 = t1.descricao_origem.toLowerCase().trim();
+    const desc2 = t2.descricao_origem.toLowerCase().trim();
     
-    return score / 10; // Normalizar para 0-1
+    if (desc1 === desc2) {
+      score += 0.3;
+    } else if (desc1.includes(desc2) || desc2.includes(desc1)) {
+      score += 0.15;
+    }
+
+    return score;
   };
 
-  // ===== PROCESSAR DADOS QUANDO MODAL ABRE =====
+  // ===== INICIALIZAÇÃO DOS DADOS =====
   useEffect(() => {
     if (!isOpen) return;
 
@@ -80,7 +86,7 @@ export function SimpleBillDiffModal({
       type: 'existing' as const,
       transaction,
       key: `left_${transaction.id}_${index}`,
-      selected: false, // Por padrão, não manter existentes
+      selected: true, // ✅ POR PADRÃO, marcar TODAS as transações da fatura existente
       matchedWith: undefined,
       similarity: 0
     }));
@@ -90,7 +96,7 @@ export function SimpleBillDiffModal({
       type: 'new' as const,
       transaction,
       key: `right_${transaction.id}_${index}`,
-      selected: true, // Por padrão, adicionar todas as novas
+      selected: true, // Por padrão, adicionar todas as novas não matcheadas
       matchedWith: undefined,
       similarity: 0
     }));
@@ -99,11 +105,15 @@ export function SimpleBillDiffModal({
     if (oldBill.length > 0 && newBill.length > 0) {
       console.log('🔍 Detectando matches...');
       
+      const usedLeftItems = new Set<string>(); // Para evitar múltiplos matches
+      
       newRightItems.forEach(rightItem => {
         let bestMatchItem: DiffItem | null = null;
         let bestMatchSimilarity = 0;
         
         newLeftItems.forEach(leftItem => {
+          if (usedLeftItems.has(leftItem.key)) return; // Já foi matcheado
+          
           const similarity = calculateSimilarity(leftItem.transaction, rightItem.transaction);
           
           if (similarity > 0.7 && similarity > bestMatchSimilarity) {
@@ -114,98 +124,70 @@ export function SimpleBillDiffModal({
         
         if (bestMatchItem !== null && bestMatchSimilarity > 0) {
           // Marcar como matched
-          rightItem.matchedWith = (bestMatchItem as DiffItem).transaction.id;
+          rightItem.matchedWith = bestMatchItem.transaction.id;
           rightItem.similarity = bestMatchSimilarity;
-          (bestMatchItem as DiffItem).matchedWith = rightItem.transaction.id;
-          (bestMatchItem as DiffItem).similarity = bestMatchSimilarity;
+          rightItem.selected = false; // ✅ MATCH PERFEITO = desmarcada por padrão na nova
           
-          console.log(`🔗 Match encontrado: ${rightItem.transaction.descricao_origem.substring(0, 20)} (${Math.round(bestMatchSimilarity * 100)}%)`);
+          bestMatchItem.matchedWith = rightItem.transaction.id;
+          bestMatchItem.similarity = bestMatchSimilarity;
+          
+          usedLeftItems.add(bestMatchItem.key); // Marcar como usado
+          
+          console.log(`🔗 Match encontrado: ${rightItem.transaction.descricao_origem.substring(0, 30)} (${Math.round(bestMatchSimilarity * 100)}%)`);
         }
       });
     }
 
     setLeftItems(newLeftItems);
     setRightItems(newRightItems);
-    setSelectAllLeft(false);
-    setSelectAllRight(true);
+  }, [isOpen, faturaId, oldBill, newBill]);
 
-    console.log('✅ Processamento concluído');
-  }, [isOpen, oldBill, newBill, faturaId]);
-
-  // ===== FUNÇÃO PARA TOGGLE DE SELEÇÃO INDIVIDUAL =====
-  const toggleSelection = (side: 'left' | 'right', key: string) => {
-    if (side === 'left') {
-      setLeftItems(prev => prev.map(item => 
-        item.key === key ? { ...item, selected: !item.selected } : item
-      ));
-    } else {
-      setRightItems(prev => prev.map(item => 
-        item.key === key ? { ...item, selected: !item.selected } : item
-      ));
-    }
+  // ===== FUNÇÃO DE ORDENAÇÃO POR DATA CRESCENTE =====
+  const sortByDate = (items: DiffItem[]) => {
+    return items.sort((a, b) => {
+      const dateA = new Date(a.transaction.data_transacao).getTime();
+      const dateB = new Date(b.transaction.data_transacao).getTime();
+      return dateA - dateB; // Crescente
+    });
   };
 
-  // ===== FUNÇÃO PARA SELECIONAR/DESSELECIONAR TODOS =====
-  const toggleSelectAll = (side: 'left' | 'right') => {
-    if (side === 'left') {
-      const newSelected = !selectAllLeft;
-      setSelectAllLeft(newSelected);
-      setLeftItems(prev => prev.map(item => ({ ...item, selected: newSelected })));
-    } else {
-      const newSelected = !selectAllRight;
-      setSelectAllRight(newSelected);
-      setRightItems(prev => prev.map(item => ({ ...item, selected: newSelected })));
-    }
-  };
+  // ===== FILTROS PARA AS ABAS =====
+  const existingMatched = sortByDate(leftItems.filter(item => item.matchedWith));
+  const existingUnmatched = sortByDate(leftItems.filter(item => !item.matchedWith));
+  const newMatched = sortByDate(rightItems.filter(item => item.matchedWith));
+  const newUnmatched = sortByDate(rightItems.filter(item => !item.matchedWith));
 
-  // ===== CALCULAR RESULTADO FINAL CORRIGIDO =====
-  const calculateResult = (): BillChanges & { summary: any } => {
-    // Type assertions to help TypeScript understand the types
-    const selectedLeft: DiffItem[] = leftItems.filter((item: DiffItem) => item.selected);
-    const selectedRight: DiffItem[] = rightItems.filter((item: DiffItem) => item.selected);
+  // ===== FUNÇÃO PARA CALCULAR RESULTADO =====
+  const calculateResult = () => {
+    const toKeep = leftItems.filter(item => item.selected).map(item => item.transaction.id);
+    const toRemove = leftItems.filter(item => !item.selected).map(item => item.transaction.id);
+    const toAdd = rightItems.filter(item => item.selected).map(item => item.transaction);
+
+    const willKeep = toKeep.length;
+    const willAdd = toAdd.length;
+    const willRemove = toRemove.length;
+    const finalCount = willKeep + willAdd;
+
+    // Calcular valor final
+    const keptValue = leftItems
+      .filter(item => item.selected)
+      .reduce((sum, item) => sum + item.transaction.valor, 0);
     
-    const toKeep: string[] = selectedLeft.map((item: DiffItem) => item.transaction.id);
-    const toAdd: CardTransaction[] = selectedRight.map((item: DiffItem) => item.transaction);
-    const toRemove: string[] = leftItems.filter((item: DiffItem) => !item.selected).map((item: DiffItem) => item.transaction.id);
-    
-    const finalCount = toKeep.length + toAdd.length;
-    
-    // ✅ CORREÇÃO: Calcular valor final respeitando sinais (gastos negativos + estornos positivos)
-    const finalValue = Math.abs([
-      ...selectedLeft.map((item: DiffItem) => item.transaction),
-      ...toAdd
-    ].reduce((sum, t) => sum + t.valor, 0)); // Somar com sinais e depois Math.abs
-    
+    const addedValue = toAdd.reduce((sum, t) => sum + t.valor, 0);
+    const finalValue = keptValue + addedValue;
+
     return {
-      toAdd,
       toKeep,
       toRemove,
+      toAdd,
       summary: {
+        willKeep,
+        willAdd,
+        willRemove,
         finalCount,
-        finalValue,
-        willKeep: toKeep.length,
-        willAdd: toAdd.length,
-        willRemove: toRemove.length
+        finalValue: Math.abs(finalValue)
       }
     };
-  };
-
-  // ===== HANDLER PARA SUBSTITUIR TUDO =====
-  const handleReplaceAll = () => {
-    const confirmReplace = window.confirm(
-      `📄 Substituir toda a fatura?\n\n` +
-      `Isso irá:\n` +
-      `• Remover TODAS as ${oldBill.length} transações existentes\n` +
-      `• Adicionar TODAS as ${newBill.length} transações novas\n` +
-      `• Resultado: ${newBill.length} transações na base\n\n` +
-      `Esta ação não pode ser desfeita. Continuar?`
-    );
-
-    if (confirmReplace && onReplaceAll) {
-      console.log('📄 Usuário confirmou substituição completa');
-      onReplaceAll();
-      onClose();
-    }
   };
 
   // ===== APLICAR MUDANÇAS =====
@@ -218,320 +200,252 @@ export function SimpleBillDiffModal({
     });
   };
 
-  // ===== FUNÇÃO PARA RENDERIZAR TRANSAÇÃO =====
-  const renderTransaction = (item: DiffItem, side: 'left' | 'right') => {
-    const transaction = item.transaction;
-    const isMatched = item.matchedWith !== undefined;
-    const similarity = item.similarity || 0;
-    
-    // Determinar cor da borda baseado no tipo e match
-    let borderColor = 'border-gray-600';
-    let bgColor = 'bg-gray-800';
-    
-    if (side === 'left') {
-      if (isMatched) {
-        if (similarity >= 0.9) {
-          borderColor = 'border-green-500';
-          bgColor = 'bg-green-900/20';
-        } else {
-          borderColor = 'border-yellow-500'; 
-          bgColor = 'bg-yellow-900/20';
-        }
-      } else {
-        borderColor = 'border-red-500';
-        bgColor = 'bg-red-900/20';
-      }
-    } else {
-      if (isMatched) {
-        if (similarity >= 0.9) {
-          borderColor = 'border-green-500';
-          bgColor = 'bg-green-900/20';
-        } else {
-          borderColor = 'border-yellow-500';
-          bgColor = 'bg-yellow-900/20';
-        }
-      } else {
-        borderColor = 'border-blue-500';
-        bgColor = 'bg-blue-900/20';
-      }
-    }
-    
-    return (
-      <div 
-        key={item.key}
-        className={`border rounded-lg p-3 transition-all ${
-          item.selected ? borderColor + ' ' + bgColor : 'border-gray-600 bg-gray-800'
-        }`}
-      >
-        <div className="flex items-start gap-3">
-          {/* Checkbox */}
-          <div className="mt-1">
-            <input
-              type="checkbox"
-              checked={item.selected}
-              onChange={() => toggleSelection(side, item.key)}
-              className="w-4 h-4 rounded border-gray-500 bg-gray-700"
-            />
-          </div>
-
-          {/* Conteúdo */}
-          <div className="flex-1 min-w-0">
-            {/* Header com badges */}
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                {/* Badge do tipo */}
-                <span className={`px-2 py-1 rounded text-xs font-medium ${
-                  side === 'left' 
-                    ? 'bg-purple-600 text-purple-100' 
-                    : 'bg-blue-600 text-blue-100'
-                }`}>
-                  {side === 'left' ? '📋 Existente' : '📦 Nova'}
-                </span>
-                
-                {/* Badge de match */}
-                {isMatched && (
-                  <span className={`px-2 py-1 rounded text-xs font-medium ${
-                    similarity >= 0.9 
-                      ? 'bg-green-600 text-green-100' 
-                      : 'bg-yellow-600 text-yellow-100'
-                  }`}>
-                    {similarity >= 0.9 ? '✅ Match Perfeito' : '⚠️ Similar'} ({Math.round(similarity * 100)}%)
-                  </span>
-                )}
-                
-                {/* Badge de não encontrado */}
-                {side === 'left' && !isMatched && (
-                  <span className="px-2 py-1 rounded text-xs font-medium bg-red-600 text-red-100">
-                    🗑️ Não Encontrado
-                  </span>
-                )}
-                
-                {side === 'right' && !isMatched && (
-                  <span className="px-2 py-1 rounded text-xs font-medium bg-blue-600 text-blue-100">
-                    🆕 Completamente Nova
-                  </span>
-                )}
-                
-                {/* Badge de status */}
-                {transaction.status === 'classified' && (
-                  <span className="px-2 py-1 rounded text-xs bg-green-700 text-green-200">
-                    🏷️ Classificada
-                  </span>
-                )}
-              </div>
-              
-              <div className="text-right">
-                <span className={`font-medium text-sm ${
-                  transaction.valor >= 0 ? 'text-green-400' : 'text-red-400'
-                }`}>
-                  {transaction.valor >= 0 ? '+' : ''}R$ {formatCurrency(Math.abs(transaction.valor))}
-                </span>
-              </div>
-            </div>
-
-            {/* Descrição */}
-            <p className="text-sm text-gray-100 font-medium mb-1">
-              {transaction.descricao_origem}
-            </p>
-
-            {/* Detalhes */}
-            <div className="text-xs text-gray-400">
-              {formatDate(transaction.data_transacao)} • {transaction.origem}
-              {transaction.categoria && (
-                <span className="text-blue-400 ml-2">
-                  • {transaction.categoria} → {transaction.subtipo}
-                </span>
-              )}
-            </div>
-
-            {/* Efeito da seleção */}
-            <div className="mt-2">
-              <p className="text-xs text-gray-500">
-                {item.selected ? (
-                  side === 'left' 
-                    ? '✅ Será mantida na base de dados'
-                    : '✅ Será adicionada à base de dados'
-                ) : (
-                  side === 'left'
-                    ? '🗑️ Será removida da base de dados' 
-                    : '❌ Não será importada'
-                )}
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   if (!isOpen) return null;
 
   const result = calculateResult();
 
+  // ===== ESTATÍSTICAS RESUMIDAS =====
+  const stats = {
+    faturaExistente: {
+      transacoes: oldBill.length,
+      valor: oldBill.reduce((sum, t) => sum + t.valor, 0)
+    },
+    faturaNova: {
+      transacoes: newBill.length,
+      valor: newBill.reduce((sum, t) => sum + t.valor, 0)
+    },
+    matches: {
+      transacoes: newMatched.length,
+      valor: newMatched.reduce((sum, item) => sum + item.transaction.valor, 0)
+    },
+    novas: {
+      transacoes: newUnmatched.length,
+      valor: newUnmatched.reduce((sum, item) => sum + item.transaction.valor, 0)
+    }
+  };
+
+  const renderTransactionCard = (item: DiffItem, onToggle: (key: string) => void) => (
+    <div key={item.key} className={`border rounded p-2 md:p-3 ${
+      item.type === 'existing' 
+        ? (item.matchedWith ? 'bg-blue-900/20 border-blue-600' : 'bg-red-900/20 border-red-600')
+        : (item.matchedWith ? 'bg-yellow-900/20 border-yellow-600' : 'bg-green-900/20 border-green-600')
+    }`}>
+      <label className="flex items-start cursor-pointer">
+        <input
+          type="checkbox"
+          checked={item.selected}
+          onChange={() => onToggle(item.key)}
+          className="mt-1 mr-2 md:mr-3 w-4 h-4 flex-shrink-0"
+        />
+        <div className="min-w-0 flex-1">
+          <div className="text-white font-medium text-sm md:text-base truncate">
+            {item.transaction.descricao_origem}
+          </div>
+          <div className="text-gray-300 text-xs md:text-sm">
+            {formatDate(item.transaction.data_transacao)} • R$ {formatCurrency(Math.abs(item.transaction.valor))}
+            {(item.matchedWith && item.similarity && item.similarity > 0.01) ? (
+              <span className="ml-2 text-gray-400">• Match: {Math.round(item.similarity * 100)}%</span>
+            ) : null}
+          </div>
+        </div>
+      </label>
+    </div>
+  );
+
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-gray-800 rounded-lg shadow-xl max-w-7xl w-full h-[90vh] flex flex-col">
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-2 md:p-4">
+      <div className="bg-gray-800 rounded-lg shadow-xl max-w-7xl w-full h-[95vh] md:h-[90vh] flex flex-col">
         
         {/* Header */}
-        <div className="p-4 border-b border-gray-700">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-xl font-semibold text-gray-100">
-              📄 Revisão da Fatura: {faturaId}
+        <div className="p-3 md:p-4 border-b border-gray-700">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-lg md:text-xl font-semibold text-gray-100 truncate pr-2">
+              📄 {faturaId}
             </h3>
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-200 text-2xl">
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-200 text-xl md:text-2xl flex-shrink-0">
               ×
             </button>
           </div>
 
-          <div className="bg-blue-900/30 border border-blue-700 rounded-lg p-3">
-            <p className="text-blue-100 text-sm">
-              🔍 <strong>Instruções:</strong> Selecione exatamente quais transações deseja manter/adicionar na base de dados. 
-              Transações similares são automaticamente detectadas e destacadas.
-            </p>
+          {/* RESUMO ESTATÍSTICO EM UMA LINHA */}
+          <div className="text-xs text-gray-300 flex items-center gap-4 flex-wrap">
+            <span className="text-blue-300">📋 {stats.faturaExistente.transacoes} existentes</span>
+            <span className="text-green-300">📦 {stats.faturaNova.transacoes} novas</span>
+            <span className="text-yellow-300">🔗 {stats.matches.transacoes} matches</span>
+            <span className="text-purple-300 font-medium">🎯 {result.summary.finalCount} final</span>
           </div>
         </div>
 
-        {/* Conteúdo principal - Duas colunas */}
-        <div className="flex-1 overflow-hidden flex">
+        {/* LAYOUT DE 2 BLOCOS */}
+        <div className="flex-1 flex flex-col lg:flex-row overflow-hidden min-h-0">
           
-          {/* ===== COLUNA DA ESQUERDA: EXISTENTES ===== */}
-          <div className="w-1/2 border-r border-gray-700 flex flex-col">
-            <div className="p-4 border-b border-gray-700 bg-gray-850">
-              <div className="flex items-center justify-between">
-                <h4 className="font-medium text-gray-100 flex items-center gap-2">
-                  <span>📋</span>
-                  Transações Existentes ({leftItems.length})
-                </h4>
-                {leftItems.length > 0 && (
-                  <button
-                    onClick={() => toggleSelectAll('left')}
-                    className="px-3 py-1 bg-purple-600 hover:bg-purple-500 text-white rounded text-sm transition-colors"
-                  >
-                    {selectAllLeft ? 'Desmarcar Todas' : 'Marcar Todas'}
-                  </button>
-                )}
+          {/* BLOCO 1: FATURA EXISTENTE */}
+          <div className="flex-1 flex flex-col border-b lg:border-b-0 lg:border-r border-gray-700 min-h-0">
+            <div className="p-3 md:p-4 border-b border-gray-700">
+              <h4 className="text-base md:text-lg font-semibold text-blue-200 mb-3">
+                📋 Fatura Existente ({oldBill.length}) | R$ {formatCurrency(Math.abs(stats.faturaExistente.valor))}
+              </h4>
+              
+              {/* Abas do bloco existente */}
+              <div className="flex">
+                <button
+                  onClick={() => setExistingTab('matched')}
+                  className={`px-3 py-2 text-xs md:text-sm border-r border-gray-600 ${
+                    existingTab === 'matched' 
+                      ? 'bg-blue-600 text-white' 
+                      : 'bg-gray-700 text-gray-300'
+                  }`}
+                >
+                  🔗 Match ({existingMatched.length})
+                </button>
+                <button
+                  onClick={() => setExistingTab('unmatched')}
+                  className={`px-3 py-2 text-xs md:text-sm ${
+                    existingTab === 'unmatched' 
+                      ? 'bg-red-600 text-white' 
+                      : 'bg-gray-700 text-gray-300'
+                  }`}
+                >
+                  ❌ Não Achou ({existingUnmatched.length})
+                </button>
               </div>
-              <p className="text-xs text-gray-400 mt-1">
-                {leftItems.filter(i => i.selected).length} selecionadas para manter
-              </p>
             </div>
             
-            <div className="flex-1 overflow-y-auto p-4">
-              {leftItems.length === 0 ? (
-                <div className="text-center py-12">
-                  <p className="text-gray-400 text-lg">📋 Nenhuma transação existente</p>
-                  <p className="text-gray-500 text-sm mt-2">Esta é uma fatura nova</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {leftItems.map(item => renderTransaction(item, 'left'))}
-                </div>
-              )}
+            {/* Conteúdo do bloco existente */}
+            <div className="flex-1 overflow-y-auto p-3 md:p-4 min-h-0">
+              <div className="mb-3">
+                <label className="flex items-center text-xs md:text-sm text-gray-300">
+                  <input
+                    type="checkbox"
+                    checked={existingTab === 'matched' 
+                      ? existingMatched.every(item => item.selected)
+                      : existingUnmatched.every(item => item.selected)
+                    }
+                    onChange={(e) => {
+                      const allSelected = e.target.checked;
+                      setLeftItems(prev => prev.map(item => {
+                        const shouldUpdate = existingTab === 'matched' 
+                          ? item.matchedWith 
+                          : !item.matchedWith;
+                        return shouldUpdate ? { ...item, selected: allSelected } : item;
+                      }));
+                    }}
+                    className="mr-2 w-4 h-4"
+                  />
+                  Todas
+                </label>
+              </div>
+              
+              <div className="space-y-2">
+                {(existingTab === 'matched' ? existingMatched : existingUnmatched).map(item =>
+                  renderTransactionCard(item, (key) => {
+                    setLeftItems(prev => prev.map(i => 
+                      i.key === key ? { ...i, selected: !i.selected } : i
+                    ));
+                  })
+                )}
+              </div>
             </div>
           </div>
 
-          {/* ===== COLUNA DA DIREITA: NOVAS ===== */}
-          <div className="w-1/2 flex flex-col">
-            <div className="p-4 border-b border-gray-700 bg-gray-850">
-              <div className="flex items-center justify-between">
-                <h4 className="font-medium text-gray-100 flex items-center gap-2">
-                  <span>📦</span>
-                  Transações Novas ({rightItems.length})
-                </h4>
-                {rightItems.length > 0 && (
-                  <button
-                    onClick={() => toggleSelectAll('right')}
-                    className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-sm transition-colors"
-                  >
-                    {selectAllRight ? 'Desmarcar Todas' : 'Marcar Todas'}
-                  </button>
-                )}
+          {/* BLOCO 2: FATURA NOVA */}
+          <div className="flex-1 flex flex-col min-h-0">
+            <div className="p-3 md:p-4 border-b border-gray-700">
+              <h4 className="text-base md:text-lg font-semibold text-green-200 mb-3">
+                📦 Fatura Nova ({newBill.length}) | R$ {formatCurrency(Math.abs(stats.faturaNova.valor))}
+              </h4>
+              
+              {/* Abas do bloco novo */}
+              <div className="flex">
+                <button
+                  onClick={() => setNewTab('matched')}
+                  className={`px-3 py-2 text-xs md:text-sm border-r border-gray-600 ${
+                    newTab === 'matched' 
+                      ? 'bg-yellow-600 text-white' 
+                      : 'bg-gray-700 text-gray-300'
+                  }`}
+                >
+                  🔄 Match ({newMatched.length})
+                </button>
+                <button
+                  onClick={() => setNewTab('unmatched')}
+                  className={`px-3 py-2 text-xs md:text-sm ${
+                    newTab === 'unmatched' 
+                      ? 'bg-green-600 text-white' 
+                      : 'bg-gray-700 text-gray-300'
+                  }`}
+                >
+                  ✨ Novas ({newUnmatched.length})
+                </button>
               </div>
-              <p className="text-xs text-gray-400 mt-1">
-                {rightItems.filter(i => i.selected).length} selecionadas para adicionar
-              </p>
             </div>
             
-            <div className="flex-1 overflow-y-auto p-4">
-              {rightItems.length === 0 ? (
-                <div className="text-center py-12">
-                  <p className="text-gray-400 text-lg">📦 Nenhuma transação nova</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {rightItems.map(item => renderTransaction(item, 'right'))}
-                </div>
-              )}
+            {/* Conteúdo do bloco novo */}
+            <div className="flex-1 overflow-y-auto p-3 md:p-4 min-h-0">
+              <div className="mb-3">
+                <label className="flex items-center text-xs md:text-sm text-gray-300">
+                  <input
+                    type="checkbox"
+                    checked={newTab === 'matched' 
+                      ? newMatched.every(item => item.selected)
+                      : newUnmatched.every(item => item.selected)
+                    }
+                    onChange={(e) => {
+                      const allSelected = e.target.checked;
+                      setRightItems(prev => prev.map(item => {
+                        const shouldUpdate = newTab === 'matched' 
+                          ? item.matchedWith 
+                          : !item.matchedWith;
+                        return shouldUpdate ? { ...item, selected: allSelected } : item;
+                      }));
+                    }}
+                    className="mr-2 w-4 h-4"
+                  />
+                  Todas {newTab === 'matched' && '(⚠️ desmarcadas por padrão)'}
+                </label>
+              </div>
+              
+              <div className="space-y-2">
+                {(newTab === 'matched' ? newMatched : newUnmatched).map(item =>
+                  renderTransactionCard(item, (key) => {
+                    setRightItems(prev => prev.map(i => 
+                      i.key === key ? { ...i, selected: !i.selected } : i
+                    ));
+                  })
+                )}
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Footer com resultado */}
-        <div className="p-4 border-t border-gray-700 bg-gray-850">
-          {/* Resumo do resultado */}
-          <div className="bg-gray-700 rounded-lg p-3 mb-4">
-            <h5 className="font-medium text-gray-100 mb-3">📊 Resultado da Seleção:</h5>
-            
-            {/* Primeira linha: Operações */}
-            <div className="grid grid-cols-4 gap-4 text-sm mb-3">
-              <div className="text-center">
-                <p className="text-green-400 font-medium text-lg">{result.summary.willKeep}</p>
-                <p className="text-gray-300 text-xs">Manter Existentes</p>
-              </div>
-              <div className="text-center">
-                <p className="text-blue-400 font-medium text-lg">{result.summary.willAdd}</p>
-                <p className="text-gray-300 text-xs">Adicionar Novas</p>
-              </div>
-              <div className="text-center">
-                <p className="text-red-400 font-medium text-lg">{result.summary.willRemove}</p>
-                <p className="text-gray-300 text-xs">Remover Existentes</p>
-              </div>
-              <div className="text-center">
-                <p className="text-yellow-400 font-medium text-lg">{result.summary.finalCount}</p>
-                <p className="text-gray-300 text-xs">Total Final</p>
-              </div>
+        {/* FOOTER COMPACTO */}
+        <div className="p-2 md:p-3 border-t border-gray-700">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-xs md:text-sm text-purple-300">
+              {result.summary.finalCount} transações | R$ {formatCurrency(result.summary.finalValue)}
             </div>
-
-            <div className="border-t border-gray-600 pt-3 mt-3">
-              <div className="flex justify-between items-center">
-                <div>
-                  <p className="text-gray-300 text-sm">Valor total da fatura resultante:</p>
-                  <p className="font-bold text-lg text-blue-400">
-                    R$ {formatCurrency(result.summary.finalValue)}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-gray-400 text-xs">✅ Cálculo corrigido:</p>
-                  <p className="text-gray-400 text-xs">Gastos - Estornos = Líquido</p>
-                </div>
-              </div>
+            <div className="flex gap-2">
+              <button
+                onClick={onCancel}
+                className="px-3 py-1.5 bg-gray-600 hover:bg-gray-500 text-white rounded text-xs md:text-sm"
+              >
+                ❌ Cancelar
+              </button>
+              {onReplaceAll && (
+                <button
+                  onClick={onReplaceAll}
+                  className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded text-xs md:text-sm"
+                >
+                  🔄 Substituir Tudo
+                </button>
+              )}
+              <button
+                onClick={handleApply}
+                className="px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white rounded font-medium text-xs md:text-sm"
+              >
+                ✅ Salvar
+              </button>
             </div>
-          </div>
-
-          {/* Botões */}
-          <div className="flex gap-3">
-            <button
-              onClick={onCancel}
-              className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors"
-            >
-              ❌ Cancelar Importação
-            </button>
-            
-            {/* ✅ NOVO BOTÃO: Substituir Tudo */}
-            <button
-              onClick={handleReplaceAll}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors"
-              title="Substitui toda a fatura existente pela nova"
-            >
-              📄 Substituir Tudo
-            </button>
-            
-            <button
-              onClick={handleApply}
-              className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded transition-colors font-medium"
-            >
-              ✅ Salvar Seleção ({result.summary.finalCount} transações | R$ {formatCurrency(result.summary.finalValue)})
-            </button>
           </div>
         </div>
       </div>

@@ -13,12 +13,22 @@ export function ContasTab({ transactions }: ContasTabProps) {
     });
   };
 
-  // ✅ FUNÇÃO CORRIGIDA: Calcular saldo por banco excluindo reconciliados
-  const getSaldoPorBanco = (banco: string) => {
+  // ✅ FUNÇÃO NOVA: Calcular saldo por banco incluindo previstas (s + p)
+  const getSaldoCompletoPorBanco = (banco: string) => {
     return transactions
       .filter(t => 
         t.cc === banco && 
-        countsInBalance(t.realizado) // ✅ Só realizado = 's' conta no saldo
+        (t.realizado === 's' || t.realizado === 'p') // s + p
+      )
+      .reduce((sum, t) => sum + t.valor, 0);
+  };
+
+  // ✅ FUNÇÃO ADICIONAL: Calcular saldo apenas com realizado = 's'
+  const getSaldoRealizadoPorBanco = (banco: string) => {
+    return transactions
+      .filter(t => 
+        t.cc === banco && 
+        t.realizado === 's' // ✅ Só realizado = 's'
       )
       .reduce((sum, t) => sum + t.valor, 0);
   };
@@ -111,18 +121,21 @@ export function ContasTab({ transactions }: ContasTabProps) {
 
   // Calcular saldos e dados
   const saldos = bancos.map(banco => {
-    const saldo = getSaldoPorBanco(banco.codigo);
+    const saldo = getSaldoCompletoPorBanco(banco.codigo); // s + p
+    const saldoRealizado = getSaldoRealizadoPorBanco(banco.codigo); // só s
     const lastTransactionDate = getLastTransactionDate(banco.codigo);
     
     return {
       ...banco,
       saldo,
+      saldoRealizado,
       lastTransactionDate
     };
   });
 
   // ✅ SALDO TOTAL CORRIGIDO: Só contar transações que impactam saldo
-  const saldoTotal = saldos.reduce((sum, banco) => sum + banco.saldo, 0);
+  const saldoTotal = saldos.reduce((sum, banco) => sum + banco.saldo, 0); // s + p
+  const saldoTotalRealizado = saldos.reduce((sum, banco) => sum + banco.saldoRealizado, 0); // só s
 
   return (
     <div className="space-y-4">
@@ -131,6 +144,9 @@ export function ContasTab({ transactions }: ContasTabProps) {
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
             <h3 className="text-base sm:text-2xl font-bold truncate">Patrimônio Total</h3>
+            <p className="text-xs sm:text-sm text-purple-100 opacity-75 mt-1">
+              Classificado: R$ {formatCurrency(Math.abs(saldoTotalRealizado))}
+            </p>
           </div>
           <div className="text-xl sm:text-4xl font-bold flex-shrink-0">
             {saldoTotal < 0 ? '-' : ''}R$ {formatCurrency(Math.abs(saldoTotal))}
@@ -156,8 +172,8 @@ export function ContasTab({ transactions }: ContasTabProps) {
                 </h3>
               </div>
               
-              {/* Lado Direito: Data + Saldo */}
-              <div className="flex items-center gap-4 text-right">
+              {/* Lado Direito: Data + Saldos */}
+              <div className="flex items-center gap-2 md:gap-4 text-right">
                 {/* Data */}
                 <div className={`text-xs ${banco.corTexto} opacity-75`}>
                   {banco.lastTransactionDate ? (
@@ -167,9 +183,17 @@ export function ContasTab({ transactions }: ContasTabProps) {
                   )}
                 </div>
                 
-                {/* Saldo */}
-                <div className={`${banco.corTexto} font-bold text-lg min-w-[100px]`}>
-                  R$ {formatCurrency(Math.abs(banco.saldo))}
+                {/* Saldos - Móvel e Desktop */}
+                <div className="flex flex-col items-end gap-1">
+                  {/* Saldo Real (s+p) - Principal */}
+                  <div className={`${banco.corTexto} font-bold text-base md:text-lg min-w-[80px] md:min-w-[100px]`}>
+                    R$ {formatCurrency(Math.abs(banco.saldo))}
+                  </div>
+                  
+                  {/* Saldo Classificado (s) - Menor */}
+                  <div className={`${banco.corTexto} text-xs opacity-75`}>
+                    Classif.: R$ {formatCurrency(Math.abs(banco.saldoRealizado))}
+                  </div>
                 </div>
               </div>
             </div>

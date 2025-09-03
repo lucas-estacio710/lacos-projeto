@@ -11,6 +11,7 @@ import { ConfigProvider } from '@/contexts/ConfigContext';
 // Hooks
 import { useTransactions } from '@/hooks/useTransactions';
 import { useCardTransactions } from '@/hooks/useCardTransactions';
+import { useHierarchy } from '@/hooks/useHierarchy';
 
 // Componentes
 import BankUpload from '@/components/BankUpload';
@@ -38,6 +39,8 @@ export default function DashboardPage() {
     executeReconciliation,
     refreshTransactions
   } = useTransactions();
+  
+  const { visaoPlana } = useHierarchy();
   
   const { 
     cardTransactions,
@@ -189,7 +192,49 @@ export default function DashboardPage() {
   };
 
   const handleSaveTransaction = async (updatedTransaction: Transaction) => {
+    const originalTransactionId = updatedTransaction.id;
+    
+    // 1. Atualizar a transação
     await updateTransaction(updatedTransaction);
+    
+    // 2. Se a transação foi classificada, aguardar reclassificação automática
+    if (updatedTransaction.realizado === 's') {
+      console.log('🔄 Transação classificada, aguardando reclassificação automática...');
+      
+      // Aguardar até que a transação seja reclassificada ou timeout
+      let tentativas = 0;
+      const maxTentativas = 30; // 30 segundos máximo
+      
+      while (tentativas < maxTentativas) {
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Aguardar 1 segundo
+        
+        // Verificar se a transação ainda existe na lista atual
+        const transacaoAtual = transactions.find(t => t.id === originalTransactionId);
+        
+        if (!transacaoAtual) {
+          console.log('✅ Transação foi reclassificada e removida da lista atual');
+          break;
+        }
+        
+        // Se mudou de categoria, consideramos como reclassificada
+        if (transacaoAtual.categoria !== updatedTransaction.categoria) {
+          console.log('✅ Transação foi reclassificada para nova categoria');
+          break;
+        }
+        
+        tentativas++;
+        console.log(`⏳ Aguardando reclassificação... ${tentativas}/${maxTentativas}`);
+      }
+      
+      if (tentativas >= maxTentativas) {
+        console.log('⚠️ Timeout na reclassificação, mas continuando...');
+      }
+      
+      // Forçar refresh dos dados após reclassificação
+      console.log('🔄 Recarregando dados após reclassificação...');
+      await refreshTransactions();
+    }
+    
     setEditingTransaction(null);
   };
 
@@ -260,15 +305,25 @@ export default function DashboardPage() {
   };
 
   const handleConfirmCardSplit = async (parts: Array<{
-    categoria: string;
-    subtipo: string;
+    subtipo_id: string;
     descricao_classificada: string;
     valor: number;
   }>) => {
     if (!splitingCardTransaction) return;
     
     try {
-      const result = await splitCardTransaction(splitingCardTransaction, parts);
+      // ✅ Converter subtipo_id para categoria/subtipo legacy para splitCardTransaction
+      const convertedParts = parts.map(part => {
+        const hierarchyItem = visaoPlana?.find(v => v.subtipo_id === part.subtipo_id);
+        return {
+          categoria: hierarchyItem?.categoria_nome || 'Sem categoria',
+          subtipo: hierarchyItem?.subtipo_nome || 'Sem subtipo', 
+          descricao_classificada: part.descricao_classificada,
+          valor: part.valor
+        };
+      });
+      
+      const result = await splitCardTransaction(splitingCardTransaction, convertedParts);
       if (result.success) {
         alert(`✅ Transação de cartão dividida em ${result.partsCreated} partes!`);
         setSplitingCardTransaction(null);
@@ -486,6 +541,9 @@ export default function DashboardPage() {
         await updateTransaction(updatedTransaction);
       }
       
+      // Forçar refresh após classificação em lote
+      await refreshTransactions();
+      
       alert(`✅ ${classifications.length} transações classificadas!`);
     } catch (error) {
       console.error('⛔ Erro na classificação em lote:', error);
@@ -506,6 +564,10 @@ export default function DashboardPage() {
       }));
       
       const count = await updateMultipleCardTransactions(updates);
+      
+      // Forçar refresh após classificação em lote
+      await refreshTransactions();
+      
       alert(`✅ ${count} transações de cartão classificadas!`);
     } catch (error) {
       console.error('⛔ Erro na classificação em lote:', error);
@@ -542,32 +604,141 @@ export default function DashboardPage() {
       <div className="min-h-screen bg-gray-900">
       <div className="max-w-md mx-auto p-4 pb-20">
         {/* Header */}
-        <div className="bg-gradient-to-br from-gray-900 via-purple-950 to-black border border-purple-900/50 text-white py-4 px-4 rounded-xl mb-4 shadow-2xl relative overflow-hidden">
+        <div className="bg-gradient-to-br from-gray-900 via-purple-950 to-black border border-purple-900/50 text-white py-1 px-4 rounded-xl mb-1 shadow-2xl relative overflow-hidden min-h-[100px]">
           <div className="absolute inset-0 bg-gradient-to-r from-purple-900/10 via-indigo-900/10 to-gray-900/10 blur-xl opacity-30 animate-pulse"></div>
           
-          {/* Matrix effect background */}
-          <div className="absolute inset-0 opacity-5">
-            <div className="absolute top-2 left-4 text-green-400 text-xs font-mono animate-pulse">01001100</div>
-            <div className="absolute top-6 right-8 text-blue-400 text-xs font-mono animate-pulse delay-75">AI.v3.0</div>
-            <div className="absolute bottom-2 left-8 text-cyan-400 text-xs font-mono animate-pulse delay-150">NEURAL</div>
-            <div className="absolute bottom-6 right-4 text-purple-400 text-xs font-mono animate-pulse delay-300">QUANTUM</div>
+          {/* 🌩️ 5 RAIOS OTIMIZADOS 🌩️ */}
+          <div className="absolute inset-0 pointer-events-none overflow-hidden">
+            
+            {/* RAIO 1 - Esquerda Superior */}
+            <div className="absolute inset-0">
+              <div className="absolute inset-0 bg-white/20 opacity-0" style={{animation: 'lightning-flash 20s ease-in-out infinite', animationDelay: '1s'}}></div>
+              <svg className="absolute inset-0 w-full h-full opacity-0" style={{animation: 'lightning-strike 20s ease-in-out infinite', animationDelay: '1s'}}>
+                <path d="M25,5 L32,12 L28,18 L35,25 L30,32 L38,38 L33,45 L45,52" 
+                  stroke="#ffffff" strokeWidth="3" fill="none" 
+                  filter="drop-shadow(0 0 12px #00ffff)" strokeLinecap="round"/>
+                <path d="M30,32 L22,38 L25,45" 
+                  stroke="#00ffff" strokeWidth="2" fill="none" 
+                  filter="drop-shadow(0 0 8px #00ffff)" strokeLinecap="round"/>
+              </svg>
+            </div>
+            
+            {/* RAIO 2 - Centro com Ramificações */}
+            <div className="absolute inset-0">
+              <div className="absolute inset-0 bg-white/25 opacity-0" style={{animation: 'lightning-flash 20s ease-in-out infinite', animationDelay: '5s'}}></div>
+              <svg className="absolute inset-0 w-full h-full opacity-0" style={{animation: 'lightning-strike 20s ease-in-out infinite', animationDelay: '5s'}}>
+                <path d="M160,5 L155,25 L165,45 L160,65 L170,85" 
+                  stroke="#ffffff" strokeWidth="4" fill="none" 
+                  filter="drop-shadow(0 0 18px #00ffff)" strokeLinecap="round"/>
+                <path d="M165,45 L175,50 L170,60" 
+                  stroke="#00ffff" strokeWidth="2.5" fill="none" 
+                  filter="drop-shadow(0 0 10px #00ffff)" strokeLinecap="round"/>
+              </svg>
+            </div>
+
+            {/* RAIO 3 - Grande Central */}
+            <div className="absolute inset-0">
+              <div className="absolute inset-0 bg-white/35 opacity-0" style={{animation: 'lightning-flash 20s ease-in-out infinite', animationDelay: '9s'}}></div>
+              <svg className="absolute inset-0 w-full h-full opacity-0" style={{animation: 'lightning-strike 20s ease-in-out infinite', animationDelay: '9s'}}>
+                <path d="M120,8 L125,15 L118,22 L130,28 L122,35 L140,42 L135,48 L145,55 L138,62 L155,68" 
+                  stroke="#ffffff" strokeWidth="5" fill="none" 
+                  filter="drop-shadow(0 0 25px #00ffff) drop-shadow(0 0 45px #00ffff)" strokeLinecap="round"/>
+                <path d="M122,35 L115,40 L118,47" 
+                  stroke="#00ffff" strokeWidth="3" fill="none" 
+                  filter="drop-shadow(0 0 15px #00ffff)" strokeLinecap="round"/>
+                <path d="M140,42 L148,46 L145,52" 
+                  stroke="#00ddff" strokeWidth="2.5" fill="none" 
+                  filter="drop-shadow(0 0 10px #00ffff)" strokeLinecap="round"/>
+              </svg>
+            </div>
+            
+            {/* RAIO 4 - Direita Potente */}
+            <div className="absolute inset-0">
+              <div className="absolute inset-0 bg-white/22 opacity-0" style={{animation: 'lightning-flash 20s ease-in-out infinite', animationDelay: '13s'}}></div>
+              <svg className="absolute inset-0 w-full h-full opacity-0" style={{animation: 'lightning-strike 20s ease-in-out infinite', animationDelay: '13s'}}>
+                <path d="M285,15 L275,35 L290,55 L280,75 L295,95" 
+                  stroke="#ffffff" strokeWidth="4" fill="none" 
+                  filter="drop-shadow(0 0 18px #00ffff)" strokeLinecap="round"/>
+                <path d="M290,55 L300,60" 
+                  stroke="#00ffff" strokeWidth="3" fill="none" 
+                  filter="drop-shadow(0 0 12px #00ffff)" strokeLinecap="round"/>
+              </svg>
+            </div>
+
+            {/* RAIO 5 - Diagonal Final */}
+            <div className="absolute inset-0">
+              <div className="absolute inset-0 bg-white/30 opacity-0" style={{animation: 'lightning-flash 20s ease-in-out infinite', animationDelay: '17s'}}></div>
+              <svg className="absolute inset-0 w-full h-full opacity-0" style={{animation: 'lightning-strike 20s ease-in-out infinite', animationDelay: '17s'}}>
+                <path d="M40,10 L65,30 L60,50 L85,70 L80,90 L105,110" 
+                  stroke="#ffffff" strokeWidth="4.5" fill="none" 
+                  filter="drop-shadow(0 0 20px #00ffff)" strokeLinecap="round"/>
+                <path d="M60,50 L50,60 L55,75" 
+                  stroke="#00ffff" strokeWidth="3" fill="none" 
+                  filter="drop-shadow(0 0 12px #00ffff)" strokeLinecap="round"/>
+              </svg>
+            </div>
+
           </div>
+          
+          <style jsx>{`
+            @keyframes lightning-strike {
+              0% { opacity: 0; }
+              0.5% { opacity: 1; }
+              1% { opacity: 0.8; }
+              1.5% { opacity: 0.6; }
+              2% { opacity: 0.4; }
+              2.5% { opacity: 0.2; }
+              3% { opacity: 0; }
+              100% { opacity: 0; }
+            }
+            
+            @keyframes lightning-branch {
+              0% { opacity: 0; }
+              0.3% { opacity: 0; }
+              0.8% { opacity: 1; }
+              1.3% { opacity: 0.7; }
+              1.8% { opacity: 0.5; }
+              2.3% { opacity: 0.3; }
+              2.8% { opacity: 0; }
+              100% { opacity: 0; }
+            }
+            
+            @keyframes lightning-tip {
+              0% { opacity: 0; }
+              0.6% { opacity: 0; }
+              1.1% { opacity: 1; }
+              1.6% { opacity: 0.6; }
+              2.1% { opacity: 0.4; }
+              2.6% { opacity: 0.2; }
+              3.1% { opacity: 0; }
+              100% { opacity: 0; }
+            }
+            
+            @keyframes lightning-flash {
+              0% { opacity: 1; }
+              0.2% { opacity: 0.9; }
+              0.4% { opacity: 0.7; }
+              0.7% { opacity: 0.4; }
+              1.1% { opacity: 0.2; }
+              1.4% { opacity: 0; }
+              100% { opacity: 0; }
+            }
+          `}</style>
+          
           
           <div className="relative">
             {/* Main title - spanning full width */}
-            <div className="flex items-center justify-between mb-3">
-              <div className="h-px bg-gradient-to-r from-transparent via-cyan-500/50 to-cyan-500 flex-1"></div>
-              <h1 className="text-3xl md:text-4xl font-black mx-4 relative group">
-                <span className="bg-gradient-to-r from-cyan-300 via-purple-300 to-pink-300 bg-clip-text text-transparent tracking-wider">
+            <div className="flex items-center justify-center mb-2 pt-4">
+              <h1 className="text-3xl md:text-4xl font-black mx-4 relative group font-[family-name:var(--font-michroma)]">
+                <span className="bg-gradient-to-r from-cyan-300 via-purple-300 to-pink-300 bg-clip-text text-transparent tracking-wider font-bold">
                   LAÇOS 3.0
                 </span>
                 <div className="absolute -inset-2 bg-gradient-to-r from-cyan-600 via-purple-600 to-pink-600 rounded-lg blur opacity-20 group-hover:opacity-60 transition duration-1000"></div>
               </h1>
-              <div className="h-px bg-gradient-to-r from-cyan-500 via-cyan-500/50 to-transparent flex-1"></div>
             </div>
             
             {/* Subtitle - full width bar */}
-            <div className="bg-gradient-to-r from-gray-900/90 via-purple-900/40 to-gray-900/90 border border-cyan-500/20 rounded-full py-2 px-6 backdrop-blur-sm">
+            <div className="bg-gradient-to-r from-gray-900/90 via-purple-900/40 to-gray-900/90 border border-cyan-500/20 rounded-full py-2 px-6 backdrop-blur-sm mb-2">
               <div className="flex items-center justify-center gap-3">
                 <div className="w-2 h-2 bg-cyan-400 rounded-full animate-ping"></div>
                 <span className="text-sm font-mono font-bold text-transparent bg-gradient-to-r from-cyan-400 via-purple-400 to-pink-400 bg-clip-text tracking-wide">
@@ -575,14 +746,15 @@ export default function DashboardPage() {
                 </span>
                 <div className="w-2 h-2 bg-purple-400 rounded-full animate-ping delay-150"></div>
               </div>
-              
-              {/* Neural network lines */}
-              <div className="flex justify-center mt-2 gap-1">
-                <div className="w-8 h-px bg-gradient-to-r from-transparent to-cyan-400 animate-pulse"></div>
-                <div className="w-4 h-px bg-gradient-to-r from-cyan-400 to-purple-400 animate-pulse delay-75"></div>
-                <div className="w-6 h-px bg-gradient-to-r from-purple-400 to-pink-400 animate-pulse delay-150"></div>
-                <div className="w-4 h-px bg-gradient-to-r from-pink-400 to-purple-400 animate-pulse delay-225"></div>
-                <div className="w-8 h-px bg-gradient-to-r from-purple-400 to-transparent animate-pulse delay-300"></div>
+            </div>
+            
+            {/* Online Status */}
+            <div className="flex items-center justify-center">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                <span className="text-xs font-mono text-green-400 tracking-wide">
+                  ONLINE
+                </span>
               </div>
             </div>
           </div>

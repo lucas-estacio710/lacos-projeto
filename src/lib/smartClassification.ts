@@ -358,7 +358,7 @@ export const prepareBatchClassification = (
       selectedConta: topMatch?.conta || '',
       selectedCategoria: topMatch?.categoria || '',
       selectedSubtipo: topMatch?.subtipo || '',
-      selectedDescricao: topMatch?.descricao || transaction.descricao_origem || 'Sem descrição'
+      selectedDescricao: transaction.descricao_origem || 'Sem descrição'
     };
   });
 };

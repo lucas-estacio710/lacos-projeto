@@ -26,6 +26,7 @@ interface EnhancedUnclassifiedSectionProps {
     conta: string;
     categoria: string;
     subtipo: string;
+    customDescriptions?: Record<string, string>; // Adicionar suporte para descrições customizadas
   }) => Promise<void>;
 }
 
@@ -46,11 +47,38 @@ export function EnhancedUnclassifiedSection({
   const { customAccounts } = useConfig();
 
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
+  const [editingDescriptions, setEditingDescriptions] = useState<Record<string, string>>({});
   
   const handleMoveToComplexClassification = (item: Transaction | CardTransaction) => {
     if (onMoveToComplexClassification) {
       onMoveToComplexClassification(item);
     }
+  };
+
+  // Função para classificação rápida com descrição editada
+  const handleQuickClassificationWithDescription = (item: Transaction | CardTransaction, subtipoId: string) => {
+    const editedDescription = editingDescriptions[item.id];
+    
+    if (onApplyBatchClassification) {
+      // Usar nova funcionalidade de descrições customizadas
+      const customDescriptions = editedDescription?.trim() 
+        ? { [item.id]: editedDescription.trim() }
+        : undefined;
+        
+      onApplyBatchClassification({
+        selectedIds: [item.id],
+        conta: '',
+        categoria: '',
+        subtipo: subtipoId,
+        customDescriptions
+      });
+    }
+    
+    // Fechar expansão e limpar descrição editada
+    setExpandedItem(null);
+    const newDescriptions = { ...editingDescriptions };
+    delete newDescriptions[item.id];
+    setEditingDescriptions(newDescriptions);
   };
 
   const handleQuickClassification = (item: Transaction | CardTransaction, subtipoId: string) => {
@@ -143,58 +171,75 @@ export function EnhancedUnclassifiedSection({
                     </div>
                   </div>
                   
-                  {/* Conteúdo expandido individual - igual versão expandida original */}
+                  {/* Conteúdo expandido individual com informações detalhadas */}
                   {expandedItem === item.id && (
-                    <div className="mt-3 space-y-3">
-                      {/* Botões de Ação no topo */}
-                      <div className="flex items-center gap-1">
+                    <div className="mt-3 space-y-3 bg-gray-700 p-3 rounded border border-gray-600">
+                      {/* Informações detalhadas */}
+                      <div className="space-y-2 text-sm">
+                        {/* Primeira linha: Descrição + Botões */}
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="text-gray-200 break-words">{item.descricao_origem || 'Sem descrição'}</div>
+                          </div>
+                          
+                          {/* Botões de Ação na mesma linha */}
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            {/* Botão de Classificação Complexa */}
+                            {onMoveToComplexClassification && (
+                              <button
+                                onClick={() => handleMoveToComplexClassification(item as Transaction | CardTransaction)}
+                                className="w-7 h-7 bg-green-600 hover:bg-green-500 text-white rounded text-xs transition-colors flex items-center justify-center shadow-sm"
+                                title="Mover para Classificação Complexa"
+                              >
+                                🧩
+                              </button>
+                            )}
+                            
+                            {/* Botão de Edição */}
+                            <button
+                              onClick={() => {
+                                if (isTransaction && onEditTransaction) {
+                                  onEditTransaction(transaction);
+                                } else if (!isTransaction && onEditCardTransaction) {
+                                  onEditCardTransaction(cardTransaction);
+                                }
+                              }}
+                              className="w-7 h-7 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded text-xs transition-colors flex items-center justify-center shadow-sm"
+                              title="Editar/Classificar"
+                            >
+                              ✏️
+                            </button>
+                          </div>
+                        </div>
                         
-                        {/* Botão de Classificação Complexa */}
-                        {onMoveToComplexClassification && (
-                          <button
-                            onClick={() => handleMoveToComplexClassification(item as Transaction | CardTransaction)}
-                            className="w-7 h-7 bg-orange-600 hover:bg-orange-500 text-white rounded text-xs transition-colors flex items-center justify-center shadow-sm"
-                            title="Mover para Classificação Complexa"
-                          >
-                            🧩
-                          </button>
+                        {/* Segunda linha: Cartão se necessário */}
+                        {!isTransaction && cardTransaction.cc && (
+                          <div>
+                            <span className="text-gray-400 text-xs">Cartão:</span>
+                            <div className="text-gray-200">{cardTransaction.cc}</div>
+                          </div>
                         )}
                         
-                        
-                        {/* Botão de Reconciliação */}
-                        {onReconcileTransaction && isTransaction && canReconcile && !(transaction as any).is_from_reconciliation && (
-                          <button
-                            onClick={() => onReconcileTransaction(transaction)}
-                            className="w-7 h-7 bg-green-600 hover:bg-green-500 text-white rounded text-xs transition-colors flex items-center justify-center shadow-sm"
-                            title="Reconciliar com fatura"
-                          >
-                            🔗
-                          </button>
-                        )}
-                        
-                        {/* Botão de Edição */}
-                        <button
-                          onClick={() => {
-                            if (isTransaction && onEditTransaction) {
-                              onEditTransaction(transaction);
-                            } else if (!isTransaction && onEditCardTransaction) {
-                              onEditCardTransaction(cardTransaction);
-                            }
-                          }}
-                          className="w-7 h-7 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs transition-colors flex items-center justify-center shadow-sm"
-                          title="Editar/Classificar"
-                        >
-                          ✏️
-                        </button>
+                        {/* Campo de edição de descrição */}
+                        <div>
+                          <label className="text-gray-400 text-xs block mb-1">Nova Descrição:</label>
+                          <input
+                            type="text"
+                            value={editingDescriptions[item.id] || ''}
+                            onChange={(e) => setEditingDescriptions(prev => ({ ...prev, [item.id]: e.target.value }))}
+                            placeholder={item.descricao_origem || 'Digite uma descrição...'}
+                            className="w-full px-2 py-1 bg-gray-600 border border-gray-500 rounded text-gray-100 text-sm placeholder-gray-400 focus:border-blue-500 focus:outline-none"
+                          />
+                        </div>
                       </div>
 
-                      {/* Botões de Ação Rápida - Dinâmicos */}
-                      <div className="flex flex-wrap gap-1">
+                      {/* Botões de Ação Rápida com Descrição Editada - Grid 2x3 */}
+                      <div className="grid grid-cols-3 gap-1 pt-2 border-t border-gray-600">
                         {getQuickActionCategories(contas, categorias, subtipos).map(category => (
                           <button
                             key={category.id}
-                            onClick={() => handleQuickClassification(item as Transaction | CardTransaction, category.id)}
-                            className={`px-2 py-1 ${category.color} text-white rounded text-xs transition-colors hover:scale-105 flex items-center gap-1`}
+                            onClick={() => handleQuickClassificationWithDescription(item as Transaction | CardTransaction, category.id)}
+                            className={`px-2 py-1 ${category.color} text-white rounded text-xs transition-colors hover:scale-105 flex items-center gap-1 justify-center`}
                             title={`${category.title}: ${category.conta_codigo} > ${category.categoria_nome} > ${category.subtipo_nome}`}
                           >
                             <span>{category.label}</span>

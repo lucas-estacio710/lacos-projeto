@@ -4,6 +4,8 @@ import React, { useState, useEffect } from 'react';
 import { Transaction } from '@/types';
 import { CardTransaction } from '@/hooks/useCardTransactions';
 import { formatCurrency, formatMonth, formatDate } from '@/lib/utils';
+import { useHierarchy } from '@/hooks/useHierarchy';
+import { getTransactionHierarchy } from '@/lib/hierarchyHelpers';
 
 interface ReconciliationModalProps {
   isOpen: boolean;
@@ -30,6 +32,16 @@ export function ReconciliationModal({
   const [showDetails, setShowDetails] = useState(false);
   const [selectedCards, setSelectedCards] = useState<Set<string>>(new Set());
   const [selectAll, setSelectAll] = useState(true);
+  
+  // Hook para acessar hierarquia
+  const { contas, categorias, subtipos, carregarTudo } = useHierarchy();
+
+  // Carregar hierarquia quando modal abre
+  useEffect(() => {
+    if (isOpen) {
+      carregarTudo();
+    }
+  }, [isOpen, carregarTudo]);
 
   // Reset quando modal abre/fecha
   useEffect(() => {
@@ -319,11 +331,14 @@ export function ReconciliationModal({
                           </p>
                           <p className="text-xs text-gray-400">
                             {formatDate(cardTx.data_transacao)}
-                            {cardTx.categoria && (
-                              <span className="text-blue-400 ml-2">
-                                • {cardTx.categoria} → {cardTx.subtipo}
-                              </span>
-                            )}
+                            {cardTx.subtipo_id && (() => {
+                              const hierarchy = getTransactionHierarchy(cardTx, contas, categorias, subtipos);
+                              return hierarchy ? (
+                                <span className="text-blue-400 ml-2">
+                                  • {hierarchy.categoria_nome} → {hierarchy.subtipo_nome}
+                                </span>
+                              ) : null;
+                            })()}
                           </p>
                         </div>
                         <span className={`text-sm font-medium ${

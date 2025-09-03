@@ -62,9 +62,9 @@ export function useTransactions() {
         hierarchy: transaction.subtipo_id ? hierarchyMap[transaction.subtipo_id] : null
       })) || [];
 
-      // console.log('🔍 loadTransactions - Total loaded:', data.length);
-      // console.log('🔍 loadTransactions - With hierarchy:', data.filter(t => t.hierarchy).length);
-      // console.log('🔍 loadTransactions - CONC transactions:', data.filter(t => t.hierarchy?.conta_codigo === 'CONC').length);
+      console.log('🔍 loadTransactions - Total loaded:', data.length);
+      console.log('🔍 loadTransactions - With hierarchy:', data.filter(t => t.hierarchy).length);
+      console.log('🔍 loadTransactions - CONC transactions:', data.filter(t => t.hierarchy?.conta_codigo === 'CONC').length);
 
       setTransactions(data);
     } catch (err) {

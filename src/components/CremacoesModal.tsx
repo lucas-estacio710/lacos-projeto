@@ -258,11 +258,6 @@ export function CremacoesModal({
 
       const [dateStr, nameAndPet, valueStr] = parts;
       
-      // Parse data DD/MM/AAAA para YYYY-MM-DD
-      const [day, month, year] = dateStr.split('/');
-      const formattedDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-      const mes = `${year.slice(2)}${month.padStart(2, '0')}`;
-      
       // Parse nome-pet-tipo
       const nameParts = nameAndPet.split('-');
       if (nameParts.length < 3) return;
@@ -279,17 +274,17 @@ export function CremacoesModal({
       const subtipo_id = isIndividual ? SUBTIPO_CREMACAO_INDIVIDUAL : SUBTIPO_CREMACAO_COLETIVA;
       
       // Gerar ID único
-      const id = `CREM${formattedDate.replace(/\-/g, '')}${index.toString().padStart(3, '0')}`;
+      const id = `CREM${index.toString().padStart(3, '0')}`;
       
       const transaction = {
         id,
-        mes,
-        data: formattedDate,
+        mes: baseTransaction.mes, // Herdar mes da transação original
+        data: baseTransaction.data, // Herdar data da transação original
         descricao_origem: baseTransaction.descricao_origem, // Herdar da transação original
         descricao: `${nome.toUpperCase()} - ${pet.toUpperCase()} - ${tipo.toUpperCase()}`,
         valor: valor,
-        origem: defaultOrigem, // Usar origem da transação selecionada
-        cc: defaultCC,        // Usar CC da transação selecionada
+        origem: baseTransaction.origem, // Herdar origem da transação original
+        cc: baseTransaction.cc, // Herdar cc da transação original
         realizado: 's' as const,
         subtipo_id,
         is_from_reconciliation: false,
@@ -344,11 +339,6 @@ export function CremacoesModal({
 
       const [dateStr, nameAndPet, valueStr] = parts;
       
-      // Parse data DD/MM/AAAA para YYYY-MM-DD
-      const [day, month, year] = dateStr.split('/');
-      const formattedDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-      const mes = `${year.slice(2)}${month.padStart(2, '0')}`;
-      
       // Parse nome-pet-tipo
       const nameParts = nameAndPet.split('-');
       if (nameParts.length < 3) return;
@@ -365,17 +355,17 @@ export function CremacoesModal({
       const subtipo_id = isIndividual ? SUBTIPO_CREMACAO_INDIVIDUAL : SUBTIPO_CREMACAO_COLETIVA;
       
       // Gerar ID único
-      const id = `CREM${formattedDate.replace(/\-/g, '')}${index.toString().padStart(3, '0')}`;
+      const id = `CREM${index.toString().padStart(3, '0')}`;
       
       const transaction = {
         id,
-        mes,
-        data: formattedDate,
+        mes: baseTransaction.mes, // Herdar mes da transação original
+        data: baseTransaction.data, // Herdar data da transação original
         descricao_origem: baseTransaction.descricao_origem, // Herdar da transação original
         descricao: `${nome.toUpperCase()} - ${pet.toUpperCase()} - ${tipo.toUpperCase()}`,
         valor: valor,
-        origem: defaultOrigem,
-        cc: defaultCC,
+        origem: baseTransaction.origem, // Herdar origem da transação original
+        cc: baseTransaction.cc, // Herdar cc da transação original
         realizado: 's' as const,
         subtipo_id,
         is_from_reconciliation: false,

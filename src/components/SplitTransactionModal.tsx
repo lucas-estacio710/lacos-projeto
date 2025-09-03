@@ -136,8 +136,8 @@ export function SplitTransactionModal({ transaction, isOpen, onClose, onSplit }:
                 </p>
               </div>
               <div>
-                <label className="text-sm text-gray-400">Conta (Auto)</label>
-                <p className="text-blue-400">{account}</p>
+                <label className="text-sm text-gray-400">Origem</label>
+                <p className="text-blue-400">{transaction.origem}</p>
               </div>
             </div>
           </div>

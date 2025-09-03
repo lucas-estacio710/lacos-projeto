@@ -19,6 +19,15 @@ export interface Transaction {
   // ✅ NOVO: Apenas subtipo_id - sem campos legados
   subtipo_id: string; // UUID do subtipo na nova hierarquia
   
+  // ✅ Hierarquia anexada dinamicamente pelos hooks
+  hierarchy?: {
+    conta_codigo: string;
+    conta_nome: string;
+    categoria_nome: string;
+    subtipo_nome: string;
+    subtipo_id: string;
+  };
+  
   // 🚨 DEPRECATED: Campos temporários para compatibilidade durante migração
   // TODO: Remover após migração completa dos componentes
   conta?: string;

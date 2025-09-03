@@ -36,14 +36,14 @@ export function BatchClassificationModal({
   onApplyBatch,
   onMoveToComplexClassification // ✅ NOVA PROP
 }: BatchClassificationModalProps) {
-  const { contas, categorias, subtipos, carregarTudo } = useHierarchy();
+  const { contas, categorias, subtipos, carregarTudo, visaoPlana } = useHierarchy();
   
-  // Load hierarchy data when modal opens
+  // Load hierarchy data when modal opens (only if not loaded)
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && (contas.length === 0 || categorias.length === 0 || subtipos.length === 0)) {
       carregarTudo();
     }
-  }, [isOpen, carregarTudo]);
+  }, [isOpen, contas.length, categorias.length, subtipos.length, carregarTudo]);
   
   const [batchItems, setBatchItems] = useState<BatchClassificationItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -51,6 +51,7 @@ export function BatchClassificationModal({
   const [errors, setErrors] = useState<string[]>([]);
   const [showHistoric, setShowHistoric] = useState<Record<string, boolean>>({});
   const [selectedForComplex, setSelectedForComplex] = useState<Set<string>>(new Set()); // ✅ NOVO ESTADO
+  const [preparingBatch, setPreparingBatch] = useState(false); // ✅ NOVO: Estado de preparação
   
   // ✅ Dynamic hierarchy options
   const availableContas = useMemo(() => {
@@ -101,17 +102,30 @@ export function BatchClassificationModal({
   // Preparar dados quando modal abre
   useEffect(() => {
     if (isOpen && unclassifiedTransactions.length > 0) {
-      console.log('📄 Preparando classificação em lote...');
-      const prepared = prepareBatchClassification(
-        unclassifiedTransactions, 
-        historicTransactions,
-        historicCardTransactions
-      );
-      setBatchItems(prepared);
-      setCurrentIndex(0);
-      setErrors([]);
-      setShowHistoric({});
-      setSelectedForComplex(new Set()); // ✅ RESETAR SELEÇÃO
+      const prepareBatch = async () => {
+        setPreparingBatch(true);
+        try {
+          // ✅ Simular delay para mostrar loading em lotes grandes
+          if (unclassifiedTransactions.length > 20) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+          
+          const prepared = prepareBatchClassification(
+            unclassifiedTransactions, 
+            historicTransactions,
+            historicCardTransactions
+          );
+          setBatchItems(prepared);
+          setCurrentIndex(0);
+          setErrors([]);
+          setShowHistoric({});
+          setSelectedForComplex(new Set());
+        } finally {
+          setPreparingBatch(false);
+        }
+      };
+      
+      prepareBatch();
     }
   }, [isOpen, unclassifiedTransactions, historicTransactions, historicCardTransactions]);
 
@@ -186,7 +200,7 @@ export function BatchClassificationModal({
     ));
     
     setErrors([]);
-    console.log('🗑️ Classificação limpa para transação', currentIndex + 1);
+    // ✅ Log removido para melhor performance
   };
 
   // Obter descrições históricas para subtipo específico
@@ -224,14 +238,19 @@ export function BatchClassificationModal({
   const applyHistoricItem = (index: number, historicItem: HistoricItem) => {
     setBatchItems(prev => {
       const updated = [...prev];
+      
+      // Buscar informações da hierarquia baseadas no subtipo_id
+      const subtipoInfo = visaoPlana?.find(v => v.subtipo_id === historicItem.subtipo_id);
+      
+      
       updated[index] = {
         ...updated[index],
         selectedSubtipoId: historicItem.subtipo_id,
         selectedDescricao: historicItem.descricao,
-        // Campos legados para compatibilidade temporária
-        selectedConta: 'PF', // TODO: Derivar do subtipo_id
-        selectedCategoria: 'Temp', // TODO: Derivar do subtipo_id  
-        selectedSubtipo: 'Temp' // TODO: Derivar do subtipo_id
+        // Derivar campos da hierarquia - usar códigos para compatibilidade com dropdowns
+        selectedConta: subtipoInfo?.conta_codigo || 'PF',
+        selectedCategoria: subtipoInfo?.categoria_nome || 'Sem categoria',  
+        selectedSubtipo: subtipoInfo?.subtipo_nome || 'Sem subtipo'
       };
       return updated;
     });
@@ -361,9 +380,33 @@ export function BatchClassificationModal({
     selectedForComplex: selectedForComplex.size // ✅ NOVO
   };
 
+  // ✅ TELA DE LOADING durante preparação
+  if (preparingBatch) {
+    return (
+      <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+        <div className="bg-gray-800 rounded-lg shadow-xl p-8 max-w-md w-full text-center">
+          <div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full mx-auto mb-4"></div>
+          <h3 className="text-lg font-medium text-gray-100 mb-2">⚡ Preparando Classificação em Lote</h3>
+          <p className="text-sm text-gray-400 mb-1">
+            Analisando {unclassifiedTransactions.length} transações...
+          </p>
+          <p className="text-xs text-gray-500">
+            {unclassifiedTransactions.length > 20 
+              ? "Processando lote grande - isso pode demorar alguns segundos" 
+              : "Buscando transações similares no histórico"
+            }
+          </p>
+          <div className="mt-4 bg-gray-700 rounded-full h-2">
+            <div className="bg-blue-600 h-2 rounded-full animate-pulse" style={{width: '60%'}}></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+      <div className="bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
         <div className="p-6">
           {/* Header */}
           <div className="flex items-center justify-between mb-4">
@@ -379,106 +422,104 @@ export function BatchClassificationModal({
             </button>
           </div>
 
-          {/* Navegação - logo abaixo do título */}
+          {/* Navegação + Progress Bar */}
           {batchItems.length > 1 && (
-            <div className="grid grid-cols-2 gap-3 mb-6">
-              <button
-                onClick={goToPrevious}
-                disabled={currentIndex === 0}
-                className="py-2.5 px-4 bg-gray-600 hover:bg-gray-500 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-lg transition-colors font-medium text-sm"
-              >
-                ← Anterior
-              </button>
-              
-              <button
-                onClick={goToNext}
-                disabled={currentIndex === batchItems.length - 1}
-                className="py-2.5 px-4 bg-gray-600 hover:bg-gray-500 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-lg transition-colors font-medium text-sm"
-              >
-                Próxima →
-              </button>
+            <div className="mb-6">
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <button
+                  onClick={goToPrevious}
+                  disabled={currentIndex === 0}
+                  className="py-2.5 px-4 bg-gray-600 hover:bg-gray-500 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-lg transition-colors font-medium text-sm"
+                >
+                  ← Anterior
+                </button>
+                
+                <button
+                  onClick={goToNext}
+                  disabled={currentIndex === batchItems.length - 1}
+                  className="py-2.5 px-4 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-lg transition-all duration-300 font-medium text-sm shadow-lg hover:shadow-blue-500/25 hover:scale-105 active:scale-95 relative overflow-hidden"
+                >
+                  <span className="relative z-10">Próxima →</span>
+                  <div className="absolute inset-0 bg-gradient-to-r from-blue-600 to-blue-700 opacity-0 hover:opacity-100 transition-opacity duration-300"></div>
+                </button>
+              </div>
+              {/* Progress Bar numa linha compacta */}
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-gray-400">{currentIndex + 1}/{batchItems.length}</span>
+                <div className="flex-1 bg-gray-700 rounded-full h-1.5">
+                  <div 
+                    className="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
+                <span className="text-xs text-gray-400">{Math.round(progress)}%</span>
+              </div>
             </div>
           )}
 
           {/* ✅ NOVA SEÇÃO: Seleção para Classificação Complexa */}
           {onMoveToComplexClassification && (
-            <div className="mb-4 bg-orange-900/30 border border-orange-700 rounded-lg p-3">
-              {/* Linha 1: Título compacto */}
-              <div className="flex items-center justify-between mb-2">
-                <h4 className="font-medium text-orange-100 flex items-center gap-1 text-sm">
-                  <span>🧩</span>
-                  <span className="hidden sm:inline">Classificação</span>
-                  <span className="sm:hidden">Complex</span>
+            <div className="mb-3 bg-orange-900/20 border border-orange-600/50 rounded-md p-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-orange-100 text-xs">🧩 Complexa</span>
                   {selectedForComplex.size > 0 && (
-                    <span className="bg-orange-700 text-orange-200 px-1.5 py-0.5 rounded-full text-xs ml-1">
+                    <span className="bg-orange-700 text-orange-200 px-1.5 py-0.5 rounded-full text-xs">
                       {selectedForComplex.size}
                     </span>
                   )}
-                </h4>
-                <button
-                  onClick={handleMoveToComplex}
-                  disabled={loading || selectedForComplex.size === 0}
-                  className="px-2 py-1 bg-orange-600 hover:bg-orange-500 disabled:bg-gray-600 disabled:text-gray-400 text-white rounded text-xs transition-colors"
-                >
-                  {loading ? '⏳' : '🧩'} Mover
-                </button>
+                </div>
+                <div className="flex items-center gap-1">
+                  {batchItems.length > 0 && (
+                    <button
+                      onClick={selectAllForComplex}
+                      className="px-2 py-1 bg-orange-600/50 hover:bg-orange-600/70 text-orange-100 rounded text-xs transition-colors"
+                    >
+                      {selectedForComplex.size === batchItems.length ? 'Desmarcar' : 'Selecionar'}
+                    </button>
+                  )}
+                  <button
+                    onClick={handleMoveToComplex}
+                    disabled={loading || selectedForComplex.size === 0}
+                    className="px-2 py-1 bg-orange-600 hover:bg-orange-500 disabled:bg-gray-600 disabled:text-gray-400 text-white rounded text-xs transition-colors"
+                  >
+                    {loading ? '⏳' : 'Mover'}
+                  </button>
+                </div>
               </div>
-              
-              {/* Linha 2: Botão de seleção (só quando há itens) */}
-              {batchItems.length > 0 && (
-                <button
-                  onClick={selectAllForComplex}
-                  className="w-full px-2 py-1 bg-orange-600/50 hover:bg-orange-600/70 text-orange-100 rounded text-xs transition-colors"
-                >
-                  {selectedForComplex.size === batchItems.length ? 'Desmarcar Todas' : 'Selecionar Todas'}
-                </button>
-              )}
             </div>
           )}
 
-          {/* Progress Bar */}
-          <div className="mb-6">
-            <div className="flex justify-between text-sm text-gray-400 mb-2">
-              <span>Progresso: {currentIndex + 1} de {batchItems.length}</span>
-              <span>{Math.round(progress)}%</span>
-            </div>
-            <div className="w-full bg-gray-700 rounded-full h-2">
-              <div 
-                className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-          </div>
 
           {currentItem && (
             <>
               {/* Transação Atual */}
-              <div className="bg-gradient-to-r from-blue-900 to-blue-800 rounded-lg p-4 mb-6 border border-blue-700">
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="font-medium text-blue-100">
-                    📋 Transação {currentIndex + 1}/{batchItems.length}
+              <div className="bg-blue-900/30 border border-blue-600/50 rounded-md p-3 mb-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-blue-100 text-sm font-medium">📋</span>
                     {isCardTransaction(currentItem.transaction) && (
-                      <span className="ml-2 text-xs bg-purple-700 text-purple-200 px-2 py-1 rounded">
+                      <span className="text-xs bg-purple-700 text-purple-200 px-2 py-1 rounded">
                         {currentItem.transaction.fatura_id}
                       </span>
                     )}
-                  </h4>
+                  </div>
                   
                   {/* ✅ NOVO: Checkbox para classificação complexa na transação atual */}
                   <div className="flex items-center gap-2">
-                    <label className="flex items-center gap-2 text-orange-300 text-sm cursor-pointer">
+                    <label className="flex items-center gap-1 text-orange-300 cursor-pointer">
                       <input
                         type="checkbox"
                         checked={selectedForComplex.has(currentItem.id)}
                         onChange={() => toggleComplexSelection(currentItem.id)}
                         className="w-4 h-4 rounded border-orange-500 bg-orange-900 text-orange-600"
                       />
-                      🧩 Complexa
+                      <span className="text-sm">🧩</span>
                     </label>
                   </div>
                 </div>
                 
-                <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className="grid grid-cols-4 gap-3 text-xs">
                   <div>
                     <label className="text-blue-300">Data:</label>
                     <p className="text-blue-100">
@@ -495,19 +536,19 @@ export function BatchClassificationModal({
                       {currentItem.transaction.valor >= 0 ? '+' : ''}R$ {formatCurrency(Math.abs(currentItem.transaction.valor))}
                     </p>
                   </div>
-                  <div className="col-span-2">
-                    <label className="text-blue-300">Descrição Original:</label>
-                    <p className="text-blue-100 break-words font-medium">
-                      {currentItem.transaction.descricao_origem}
-                    </p>
-                  </div>
                   <div>
                     <label className="text-blue-300">Origem:</label>
                     <p className="text-blue-100">{currentItem.transaction.origem}</p>
                   </div>
                   <div>
-                    <label className="text-blue-300">Banco/Cartão:</label>
+                    <label className="text-blue-300">CC:</label>
                     <p className="text-blue-100">{currentItem.transaction.cc}</p>
+                  </div>
+                  <div className="col-span-4">
+                    <label className="text-blue-300">Descrição Original:</label>
+                    <p className="text-blue-100 break-words font-medium">
+                      {currentItem.transaction.descricao_origem}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -515,22 +556,22 @@ export function BatchClassificationModal({
               {/* Lista de Histórico Similar */}
               {currentItem.historicSimilar && currentItem.historicSimilar.length > 0 && (
                 <div className="bg-gray-700 rounded-lg p-4 mb-4 border border-gray-600">
-                  <div className="flex items-center justify-between mb-3">
-                    <h4 className="font-medium text-gray-100 flex items-center gap-2">
-                      <span>📚</span>
-                      Histórico Similar ({currentItem.historicSimilar.length})
+                  <div 
+                    className="flex items-center justify-between cursor-pointer hover:bg-gray-600/50 transition-colors p-2 -m-2 rounded"
+                    onClick={() => toggleHistoric(currentIndex)}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-100 text-sm">📚 Histórico Similar</span>
+                      <span className="text-gray-300 text-xs">({currentItem.historicSimilar.length})</span>
                       {currentItem.historicSimilar[0] && (
-                        <span className="text-xs bg-green-700 text-green-200 px-2 py-1 rounded">
-                          Melhor: {Math.round(currentItem.historicSimilar[0].similarity * 100)}%
+                        <span className="text-xs bg-green-700 text-green-200 px-1.5 py-0.5 rounded">
+                          {Math.round(currentItem.historicSimilar[0].similarity * 100)}%
                         </span>
                       )}
-                    </h4>
-                    <button
-                      onClick={() => toggleHistoric(currentIndex)}
-                      className="text-blue-400 hover:text-blue-300 text-sm"
-                    >
-                      {showHistoric[currentIndex] ? '▼ Ocultar' : '▶ Mostrar'} Lista
-                    </button>
+                    </div>
+                    <div className="text-blue-400 text-xs">
+                      {showHistoric[currentIndex] ? '▼' : '▶'}
+                    </div>
                   </div>
                   
                   {showHistoric[currentIndex] && (
@@ -538,50 +579,51 @@ export function BatchClassificationModal({
                       {currentItem.historicSimilar.map((item, idx) => (
                         <div
                           key={`${item.id}-${idx}`}
-                          className="border border-gray-600 rounded-lg p-3 hover:bg-gray-600 cursor-pointer transition-colors"
+                          className="border border-gray-600 rounded-md p-3 hover:bg-gray-600/50 cursor-pointer transition-colors"
                           onClick={() => applyHistoricItem(currentIndex, item)}
                         >
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center gap-2">
-                              <span className={`px-2 py-1 rounded text-xs font-medium ${
-                                item.similarity > 0.8 ? 'bg-green-700 text-green-200' :
-                                item.similarity > 0.6 ? 'bg-yellow-700 text-yellow-200' :
-                                'bg-gray-700 text-gray-300'
-                              }`}>
-                                {Math.round(item.similarity * 100)}%
-                              </span>
-                              <span className={`px-2 py-1 rounded text-xs ${
-                                item.type === 'transaction' ? 'bg-blue-600 text-blue-100' : 'bg-purple-600 text-purple-100'
-                              }`}>
-                                {item.type === 'transaction' ? '🏦 Bancária' : '💳 Cartão'}
-                              </span>
+                          {/* Layout em grid 2 colunas - mais espaço para descrições no mobile */}
+                          <div className="grid grid-cols-3 sm:grid-cols-2 gap-1 sm:gap-2">
+                            {/* Coluna Esquerda - Descrições (2 colunas no mobile, 1 no desktop) */}
+                            <div className="space-y-0.5 col-span-2 sm:col-span-1">
+                              {/* Linha 1: descricao_origem + badge no final */}
+                              <div className="text-gray-200 text-xs font-medium line-clamp-2 leading-tight">
+                                {item.descricao_origem} <span className={`px-1.5 py-0.5 rounded text-xs font-bold ${
+                                  item.similarity > 0.8 ? 'bg-green-700 text-green-200' :
+                                  item.similarity > 0.6 ? 'bg-yellow-700 text-yellow-200' :
+                                  'bg-gray-700 text-gray-300'
+                                }`}>
+                                  {Math.round(item.similarity * 100)}%
+                                </span>
+                              </div>
+                              {/* Linha 2: descricao (truncada em 2 linhas, amarelo) */}
+                              <div className="text-yellow-400 text-xs line-clamp-2 leading-tight">
+                                → {item.descricao}
+                              </div>
                             </div>
-                            <div className="text-right">
-                              <span className={`text-sm font-medium ${item.valor >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            
+                            {/* Coluna Direita - Valor e Classificação */}
+                            <div className="space-y-0.5 text-right text-xs">
+                              {/* Linha 1: Valor */}
+                              <div className={`font-bold ${item.valor >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                                 R$ {formatCurrency(Math.abs(item.valor))}
-                              </span>
-                            </div>
-                          </div>
-                          
-                          <div className="text-sm">
-                            <p className="text-gray-200 font-medium mb-1">"{item.descricao_origem}"</p>
-                            <div className="text-xs text-gray-400 grid grid-cols-2 gap-2">
-                              <div>
-                                <span>📋 Classificação:</span>
-                                <span className="text-blue-300 ml-1">Classificado</span>
                               </div>
-                              <div>
-                                <span>📝 Descrição:</span>
-                                <span className="text-green-300 ml-1">"{item.descricao}"</span>
+                              {/* Linha 2: Hierarquia compacta */}
+                              <div className="space-y-0">
+                                {(() => {
+                                  const hierarchyInfo = visaoPlana?.find(v => v.subtipo_id === item.subtipo_id);
+                                  return hierarchyInfo ? (
+                                    <>
+                                      <div className="text-gray-400">{hierarchyInfo.conta_nome}</div>
+                                      <div className="text-gray-400">→ {hierarchyInfo.categoria_nome}</div>
+                                      <div className="text-yellow-400 font-medium">→ {hierarchyInfo.subtipo_nome}</div>
+                                    </>
+                                  ) : (
+                                    <div className="text-gray-500">Sem classificação</div>
+                                  );
+                                })()}
                               </div>
                             </div>
-                            <div className="text-xs text-gray-500 mt-1">
-                              {formatDate(item.data)} • {item.origem}
-                            </div>
-                          </div>
-                          
-                          <div className="mt-2 text-center">
-                            <span className="text-xs text-blue-400">👆 Clique para aplicar esta classificação</span>
                           </div>
                         </div>
                       ))}
@@ -592,32 +634,22 @@ export function BatchClassificationModal({
 
               {/* Status da classificação atual */}
               {!currentItem.selectedCategoria ? (
-                <div className="bg-yellow-900/30 border border-yellow-700 rounded-lg p-2 mb-3">
-                  <div className="flex items-center gap-2 text-yellow-200 text-sm">
-                    ⚠️ <span>Lançamento será salvo como <strong>não classificado</strong></span>
+                <div className="bg-yellow-900/20 border border-yellow-600/50 rounded-md p-2 mb-2">
+                  <div className="text-yellow-200 text-xs">
+                    ⚠️ Lançamento será salvo como <strong>não classificado</strong>
                   </div>
                 </div>
               ) : (
-                <div className="bg-blue-900/30 border border-blue-700 rounded-lg p-2 mb-3">
-                  <div className="flex items-center gap-2 text-blue-200 text-sm">
-                    📋 <span>
-                      {currentItem.selectedConta} → {currentItem.selectedCategoria} → {currentItem.selectedSubtipo}
-                      {currentItem.selectedDescricao && ` → "${currentItem.selectedDescricao}"`}
-                    </span>
+                <div className="bg-blue-900/20 border border-blue-600/50 rounded-md p-2 mb-2">
+                  <div className="text-blue-200 text-xs truncate">
+                    📋 {currentItem.selectedConta} → {currentItem.selectedCategoria} → {currentItem.selectedSubtipo}
+                    {currentItem.selectedDescricao && ` → "${currentItem.selectedDescricao}"`}
                   </div>
                 </div>
               )}
 
               {/* Formulário de Classificação */}
               <div className="space-y-4 mb-6">
-                <div className="flex items-center justify-between">
-                  <button
-                    onClick={clearCurrentClassification}
-                    className="px-3 py-1 bg-gray-600 hover:bg-gray-500 text-white rounded text-sm transition-colors flex items-center gap-2"
-                  >
-                    🗑️ Limpar
-                  </button>
-                </div>
 
                 <div className="grid grid-cols-3 gap-3">
                   <div>
@@ -673,34 +705,6 @@ export function BatchClassificationModal({
                 <div>
                   <label className="text-sm text-gray-400 block mb-1">Descrição *</label>
                   
-                  {currentItem.selectedConta && currentItem.selectedCategoria && currentItem.selectedSubtipo && (
-                    <div className="mb-2 bg-blue-900/20 border border-blue-700 rounded-lg p-2">
-                      <p className="text-xs text-blue-300 mb-2">🔍 Sugestões:</p>
-                      <div className="flex flex-wrap gap-1">
-                        <button
-                          type="button"
-                          onClick={() => updateItem(currentIndex, 'selectedDescricao', currentItem.transaction.descricao_origem)}
-                          className="px-2 py-1 bg-gray-600 hover:bg-gray-500 text-white rounded text-xs transition-colors"
-                        >
-                          📋 Original
-                        </button>
-                        
-                        {currentItem.selectedConta && currentItem.selectedCategoria && currentItem.selectedSubtipo && 
-                         getHistoricDescriptions(
-                          findSubtipoId(currentItem.selectedConta, currentItem.selectedCategoria, currentItem.selectedSubtipo) || ''
-                        ).slice(0, 3).map(desc => (
-                          <button
-                            key={desc}
-                            type="button"
-                            onClick={() => updateItem(currentIndex, 'selectedDescricao', desc)}
-                            className="px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs transition-colors"
-                          >
-                            💡 {desc.length > 12 ? desc.substring(0, 12) + '...' : desc}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                   
                   <input
                     type="text"
@@ -713,7 +717,13 @@ export function BatchClassificationModal({
               </div>
 
               {/* Ações Rápidas */}
-              <div className="flex gap-2 mb-6">
+              <div className="flex justify-between gap-2 mb-6">
+                <button
+                  onClick={clearCurrentClassification}
+                  className="px-3 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded text-sm transition-colors"
+                >
+                  🗑️ Limpar
+                </button>
                 <button
                   onClick={() => {
                     const confirmApply = window.confirm(

@@ -2,12 +2,11 @@
 
 import React, { useState, useEffect } from 'react';
 import { CardTransaction } from '@/hooks/useCardTransactions';
-import { useConfig } from '@/contexts/ConfigContext';
 import { useHierarchy } from '@/hooks/useHierarchy';
+import { prepareClassificationOptions } from '@/lib/hierarchyHelpers';
 
 interface SplitCardPart {
-  categoria: string;
-  subtipo: string;
+  subtipo_id: string;
   descricao_classificada: string;
   valor: number;
 }
@@ -25,17 +24,19 @@ export function SplitCardTransactionModal({
   onClose, 
   onSplit 
 }: SplitCardTransactionModalProps) {
-  const { contas, categorias, subtipos } = useHierarchy();
+  const { visaoPlana } = useHierarchy();
   const [numberOfParts, setNumberOfParts] = useState(2);
   const [parts, setParts] = useState<SplitCardPart[]>([]);
   const [error, setError] = useState<string>('');
+
+  // Prepara opções de classificação
+  const classificationOptions = visaoPlana ? prepareClassificationOptions(visaoPlana) : [];
 
   // Inicializar partes quando o modal abrir
   useEffect(() => {
     if (transaction && isOpen) {
       const initialParts: SplitCardPart[] = Array.from({ length: numberOfParts }, () => ({
-        categoria: '',
-        subtipo: '',
+        subtipo_id: '',
         descricao_classificada: '',
         valor: 0
       }));
@@ -44,15 +45,6 @@ export function SplitCardTransactionModal({
     }
   }, [transaction, isOpen, numberOfParts]);
 
-  // Função para determinar a conta automaticamente
-  const getAccountForTransaction = (transaction: CardTransaction): string => {
-    // Lógica similar ao que já existe no sistema
-    if (transaction.descricao_origem?.toLowerCase().includes('posto') || 
-        transaction.descricao_origem?.toLowerCase().includes('combustivel')) {
-      return 'PJ';
-    }
-    return 'PF'; // Default
-  };
 
 
   const formatCurrency = (value: number) => {
@@ -92,9 +84,6 @@ export function SplitCardTransactionModal({
         const lastIndex = parts.length - 1;
         newParts[lastIndex].valor = transaction?.valor && transaction.valor < 0 ? -remaining : remaining;
       }
-    } else if (field === 'categoria') {
-      newParts[index][field] = value as string;
-      newParts[index].subtipo = ''; // Reset subtipo when categoria changes
     } else {
       newParts[index][field] = value as string;
     }
@@ -125,7 +114,7 @@ export function SplitCardTransactionModal({
     }
 
     const hasEmptyFields = parts.some(part => 
-      !part.categoria || !part.subtipo || !part.descricao_classificada
+      !part.subtipo_id || !part.descricao_classificada
     );
 
     if (hasEmptyFields) {
@@ -138,10 +127,6 @@ export function SplitCardTransactionModal({
   };
 
   if (!isOpen || !transaction) return null;
-
-  const account = getAccountForTransaction(transaction);
-  const contaObj = contas.find(c => c.codigo === account);
-  const categoriasParaConta = contaObj ? categorias.filter(cat => cat.conta_id === contaObj.id) : [];
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -172,10 +157,6 @@ export function SplitCardTransactionModal({
                 <p className={`font-bold ${transaction.valor >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                   {transaction.valor >= 0 ? '+' : ''}R$ {formatCurrency(transaction.valor)}
                 </p>
-              </div>
-              <div>
-                <label className="text-sm text-gray-400">Conta (Auto)</label>
-                <p className="text-blue-400">{account}</p>
               </div>
               <div>
                 <label className="text-sm text-gray-400">Cartão</label>
@@ -213,39 +194,20 @@ export function SplitCardTransactionModal({
                 </h4>
                 
                 <div className="space-y-3">
-                  {/* Categoria */}
+                  {/* Classificação */}
                   <div>
-                    <label className="text-xs text-gray-400 block mb-1">Categoria *</label>
+                    <label className="text-xs text-gray-400 block mb-1">Classificação *</label>
                     <select
-                      value={part.categoria}
-                      onChange={(e) => handlePartChange(index, 'categoria', e.target.value)}
+                      value={part.subtipo_id}
+                      onChange={(e) => handlePartChange(index, 'subtipo_id', e.target.value)}
                       className="w-full p-2 bg-gray-600 border border-gray-500 rounded text-gray-100 text-sm"
                     >
                       <option value="">Selecione...</option>
-                      {categoriasParaConta.map(cat => (
-                        <option key={cat.id} value={cat.nome}>{cat.nome}</option>
+                      {classificationOptions.map(option => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
                       ))}
-                    </select>
-                  </div>
-
-                  {/* Subtipo */}
-                  <div>
-                    <label className="text-xs text-gray-400 block mb-1">Subtipo *</label>
-                    <select
-                      value={part.subtipo}
-                      onChange={(e) => handlePartChange(index, 'subtipo', e.target.value)}
-                      className="w-full p-2 bg-gray-600 border border-gray-500 rounded text-gray-100 text-sm"
-                      disabled={!part.categoria}
-                    >
-                      <option value="">Selecione...</option>
-                      {part.categoria && (() => {
-                        const categoriaObj = categorias.find(c => c.nome === part.categoria);
-                        if (!categoriaObj) return null;
-                        const subtiposParaCategoria = subtipos.filter(sub => sub.categoria_id === categoriaObj.id);
-                        return subtiposParaCategoria.map(sub => (
-                          <option key={sub.id} value={sub.nome}>{sub.nome}</option>
-                        ));
-                      })()}
                     </select>
                   </div>
 
@@ -321,7 +283,7 @@ export function SplitCardTransactionModal({
             <button
               onClick={handleSplit}
               className="flex-1 py-2 px-4 bg-green-600 hover:bg-green-500 text-white rounded transition-colors"
-              disabled={!!error || parts.some(part => !part.categoria || !part.subtipo || !part.descricao_classificada)}
+              disabled={!!error || parts.some(part => !part.subtipo_id || !part.descricao_classificada)}
             >
               Dividir Transação
             </button>

@@ -4,7 +4,7 @@ import React, { useState, useRef } from 'react';
 import { Upload } from 'lucide-react';
 import { Transaction, BankType } from '@/types';
 import { CardTransaction } from '@/hooks/useCardTransactions';
-import { formatMonth } from '@/lib/utils';
+import { formatMonth, formatCurrency } from '@/lib/utils';
 import * as XLSX from 'xlsx';
 
 interface BankUploadProps {
@@ -23,7 +23,127 @@ export function BankUpload({
   const [selectedBank, setSelectedBank] = useState<BankType>('Inter');
   const [referenceMes, setReferenceMes] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [inputMethod, setInputMethod] = useState<'file' | 'paste'>('paste'); // ✅ PADRÃO: Colar dados
+  const [pastedData, setPastedData] = useState(''); // ✅ NOVO: Dados colados
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ✅ FUNÇÃO PARA CALCULAR SOMATÓRIA DOS DADOS COLADOS
+  const calculatePastedDataSummary = () => {
+    if (!pastedData.trim()) return { count: 0, total: 0 };
+    
+    const lines = pastedData.split('\n').filter(line => line.trim());
+    if (lines.length <= 1) return { count: 0, total: 0 }; // Só cabeçalho ou vazio
+    
+    let total = 0;
+    let validCount = 0;
+    
+    // Para cartões, usar formato: data,descricao,valor
+    const isCardTransaction = selectedBank === 'Nubank' || selectedBank === 'VISA' || selectedBank === 'MasterCard';
+    
+    if (isCardTransaction) {
+      for (let i = 1; i < lines.length; i++) { // Skip header
+        const line = lines[i].trim();
+        if (!line) continue;
+        
+        const cols = line.split(',');
+        if (cols.length >= 3) {
+          const dataCompra = cols[0].trim();
+          const titulo = cols[1].trim();
+          const valorStr = cols[2].trim();
+          
+          // ✅ USAR MESMAS VALIDAÇÕES DO PROCESSAMENTO REAL
+          if (!dataCompra || !titulo || titulo === 'title' || titulo === 'data' || titulo === 'date' || titulo.toLowerCase() === 'descricao') {
+            continue;
+          }
+          
+          // ✅ USAR MESMO ALGORITMO DO PROCESSAMENTO REAL
+          const valorOriginal = parseFloat(valorStr) || 0;
+          
+          if (!isNaN(valorOriginal) && valorOriginal !== 0) {
+            // ✅ USAR MESMO CÁLCULO DO PROCESSAMENTO REAL
+            let valorFinal: number;
+            if (valorOriginal > 0) {
+              valorFinal = -valorOriginal; // Gasto
+            } else if (valorOriginal < 0) {
+              valorFinal = Math.abs(valorOriginal); // Estorno
+            } else {
+              valorFinal = 0;
+            }
+            
+            total += valorFinal; // Soma com sinais corretos
+            validCount++;
+          }
+        }
+      }
+    } else if (selectedBank === 'Santander') {
+      // Para Santander (formato texto especial)
+      let i = 0;
+      while (i < lines.length) {
+        const line = lines[i].trim();
+        
+        // Pular linhas de data e saldo
+        if (line.match(/^(Segunda|Terça|Quarta|Quinta|Sexta|Sábado|Domingo),/) || line.includes('Saldo do dia')) {
+          i++;
+          continue;
+        }
+        
+        // Processar transação (3 linhas: descrição, tipo, valor)
+        if (i + 2 < lines.length) {
+          const descricao = lines[i].trim();
+          const tipo = lines[i + 1].trim();
+          const valorStr = lines[i + 2].trim();
+          
+          // Verificar se é uma transação válida
+          if ((tipo === 'Crédito' || tipo === 'Débito') && valorStr.match(/^-?\d{1,3}(\.\d{3})*,\d{2}$/)) {
+            const valor = parseValorBR(valorStr);
+            if (!isNaN(valor) && valor !== 0) {
+              // Para Santander: somar com sinais corretos (créditos + / débitos -)
+              total += valor; // Manter o sinal original
+              validCount++;
+            }
+            i += 3; // Pular as 3 linhas da transação
+            continue;
+          }
+        }
+        
+        i++;
+      }
+    } else {
+      // Para outros bancos (BB, etc)
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+        
+        const cols: string[] = [];
+        let current = '';
+        let inQuotes = false;
+        
+        for (let j = 0; j < line.length; j++) {
+          const char = line[j];
+          if (char === '"') {
+            inQuotes = !inQuotes;
+          } else if (char === ',' && !inQuotes) {
+            cols.push(current.trim());
+            current = '';
+          } else {
+            current += char;
+          }
+        }
+        cols.push(current.trim());
+        
+        if (cols.length >= 5) {
+          const valorStr = cols[4].replace(/^"|"$/g, '').trim();
+          const valor = parseBBValue(valorStr);
+          if (!isNaN(valor) && valor !== 0) {
+            total += Math.abs(valor);
+            validCount++;
+          }
+        }
+      }
+    }
+    
+    return { count: validCount, total };
+  };
 
   // Função simples de hash para gerar IDs únicos
   const simpleHash = (str: string): string => {
@@ -46,13 +166,18 @@ export function BankUpload({
   };
 
   // Gerador de ID único DETERMINÍSTICO (para outros bancos)
-  const generateUniqueID = (banco: string, data: string, descricao: string, valor: number): string => {
+  const generateUniqueID = (banco: string, data: string, descricao: string, valor: number, uniqueField?: string): string => {
     const dataFormatada = data.replace(/\D/g, ''); // Usar data completa: DDMMYYYY
     const valorHash = Math.abs(Math.round(valor * 100)).toString(36).slice(-4);
     const descHash = simpleHash(descricao).slice(0, 4);
     
-    const id = `${banco}${dataFormatada}${descHash}${valorHash}`;
-    console.log(`🔧 ID Generation: data='${data}' -> dataFormatada='${dataFormatada}', desc='${descricao}' -> descHash='${descHash}', valor=${valor} -> valorHash='${valorHash}' => ID='${id}'`);
+    // Usar campo único quando disponível para evitar duplicatas
+    const uniqueHash = uniqueField 
+      ? simpleHash(String(uniqueField)).slice(0, 3)
+      : '';
+    
+    const id = `${banco}${dataFormatada}${descHash}${valorHash}${uniqueHash}`;
+    console.log(`🔧 ID Generation: data='${data}' -> dataFormatada='${dataFormatada}', desc='${descricao}' -> descHash='${descHash}', valor=${valor} -> valorHash='${valorHash}', unique='${uniqueField}' -> uniqueHash='${uniqueHash}' => ID='${id}'`);
     
     return id;
   };
@@ -112,13 +237,29 @@ export function BankUpload({
 
   // Gerar mês a partir da data
   const generateMonth = (dateStr: string): string => {
-    const dateParts = dateStr.split('/');
-    if (dateParts.length === 3) {
-      const month = dateParts[1].padStart(2, '0');
-      const year = dateParts[2];
-      const yearShort = year.slice(-2);
-      return `${yearShort}${month}`;
+    // Suportar formato DD/MM/YYYY e YYYY-MM-DD
+    let dateParts;
+    
+    if (dateStr.includes('/')) {
+      // Formato DD/MM/YYYY
+      dateParts = dateStr.split('/');
+      if (dateParts.length === 3) {
+        const month = dateParts[1].padStart(2, '0');
+        const year = dateParts[2];
+        const yearShort = year.slice(-2);
+        return `${yearShort}${month}`;
+      }
+    } else if (dateStr.includes('-')) {
+      // Formato YYYY-MM-DD
+      dateParts = dateStr.split('-');
+      if (dateParts.length === 3) {
+        const year = dateParts[0];
+        const month = dateParts[1].padStart(2, '0');
+        const yearShort = year.slice(-2);
+        return `${yearShort}${month}`;
+      }
     }
+    
     return '';
   };
 
@@ -145,7 +286,9 @@ export function BankUpload({
         const titulo = cols[1].trim();
         const valorStr = cols[2].trim();
         
-        if (!dataCompra || !titulo || titulo === 'title' || titulo === 'data' || titulo === 'date') continue;
+        if (!dataCompra || !titulo || titulo === 'title' || titulo === 'data' || titulo === 'date' || titulo.toLowerCase() === 'descricao') {
+          continue;
+        }
         
         // ✅ ACEITAR QUALQUER VALOR (incluindo zero, positivo, negativo)
         const valorOriginal = parseFloat(valorStr) || 0;
@@ -188,6 +331,203 @@ export function BankUpload({
     
     console.log(`📊 ${cardType}: ${cardTransactions.length} transações processadas`);
     return cardTransactions;
+  };
+
+  // ✅ FUNÇÃO: Processar texto do Santander
+  const processSantanderText = async (lines: string[]): Promise<Transaction[]> => {
+    const transactions: Transaction[] = [];
+    
+    let currentDate = '';
+    let i = 0;
+    
+    console.log('📊 Processando extrato puro do Santander...');
+    console.log('Total de linhas:', lines.length);
+    
+    while (i < lines.length) {
+      const line = lines[i].trim();
+      console.log(`🔍 Linha ${i}: "${line}"`);
+      
+      // Verificar se é uma linha de data (ex: "Segunda, 1 de Setembro")
+      if (line.match(/^(Segunda|Terça|Quarta|Quinta|Sexta|Sábado|Domingo),\s*\d+\s*de\s*(Janeiro|Fevereiro|Março|Abril|Maio|Junho|Julho|Agosto|Setembro|Outubro|Novembro|Dezembro)/)) {
+        currentDate = line;
+        console.log('📅 Data encontrada:', currentDate);
+        i++;
+        continue;
+      }
+      
+      // Verificar se é uma linha de "Saldo do dia"
+      if (line.includes('Saldo do dia')) {
+        console.log('💰 Saldo do dia detectado, pulando...');
+        i++;
+        continue; // Pular saldo do dia
+      }
+      
+      // Processar transação (3 linhas: descrição, tipo, valor)
+      if (i + 2 < lines.length && currentDate) {
+        const descricao = lines[i].trim();
+        const tipo = lines[i + 1].trim();
+        const valorStr = lines[i + 2].trim();
+        
+        console.log(`🔍 Tentando processar transação:`);
+        console.log(`  - Descrição: "${descricao}"`);
+        console.log(`  - Tipo: "${tipo}"`);
+        console.log(`  - Valor: "${valorStr}"`);
+        console.log(`  - Data atual: "${currentDate}"`);
+        
+        // Verificar se é uma transação válida
+        const isValidType = (tipo === 'Crédito' || tipo === 'Débito');
+        const isValidValue = valorStr.match(/^-?\d{1,3}(\.\d{3})*,\d{2}$/);
+        
+        console.log(`  - Tipo válido? ${isValidType}`);
+        console.log(`  - Valor válido? ${!!isValidValue}`);
+        
+        if (isValidType && isValidValue) {
+          const valor = parseValorBR(valorStr);
+          console.log(`  - Valor convertido: ${valor}`);
+          
+          // Converter data do Santander para formato padrão
+          const dataFormatted = convertSantanderDate(currentDate);
+          console.log(`  - Data formatada: "${dataFormatted}"`);
+          
+          if (dataFormatted) {
+            const id = generateUniqueID('SANT', dataFormatted, descricao, valor);
+            
+            const transaction: Transaction = {
+              id,
+              mes: generateMonth(dataFormatted),
+              data: dataFormatted,
+              descricao_origem: descricao,
+              subtipo_id: '',
+              descricao: descricao,
+              valor,
+              origem: 'Santander',
+              cc: 'Santander',
+              realizado: 'p',
+            };
+            
+            transactions.push(transaction);
+            console.log('✅ Transação adicionada:', descricao, valor);
+          } else {
+            console.log('❌ Data não pôde ser convertida');
+          }
+          
+          i += 3; // Pular as 3 linhas da transação
+          continue;
+        }
+      }
+      
+      console.log(`⏭️ Avançando para próxima linha (${i} -> ${i + 1})`);
+      i++;
+    }
+    
+    console.log(`📊 RESULTADO FINAL: ${transactions.length} transações processadas`);
+    console.log('Transações encontradas:', transactions.map(t => `${t.descricao}: ${t.valor}`));
+    return transactions;
+  };
+
+  // Função auxiliar para converter data do Santander
+  const convertSantanderDate = (dateStr: string): string => {
+    // Converter "Segunda, 1 de Setembro" para formato YYYY-MM-DD
+    const meses: { [key: string]: string } = {
+      'Janeiro': '01', 'Fevereiro': '02', 'Março': '03', 'Abril': '04',
+      'Maio': '05', 'Junho': '06', 'Julho': '07', 'Agosto': '08',
+      'Setembro': '09', 'Outubro': '10', 'Novembro': '11', 'Dezembro': '12'
+    };
+    
+    const match = dateStr.match(/(\d+)\s*de\s*(\w+)/);
+    if (match) {
+      const dia = match[1].padStart(2, '0');
+      const mes = meses[match[2]];
+      const ano = new Date().getFullYear(); // Assumir ano atual
+      
+      if (mes) {
+        return `${ano}-${mes}-${dia}`;
+      }
+    }
+    
+    return '';
+  };
+
+
+  // ✅ NOVA FUNÇÃO: Processar dados colados
+  const handlePasteProcess = async () => {
+    if (!pastedData.trim()) {
+      alert('⚠️ Por favor, cole os dados das transações na área de texto');
+      return;
+    }
+
+    const isCardTransaction = ['Nubank', 'VISA', 'MasterCard'].includes(selectedBank);
+    if (isCardTransaction && !referenceMes) {
+      alert('⚠️ Por favor, informe o mês de referência da fatura (formato AAMM, ex: 2412 para Dez/2024)');
+      return;
+    }
+
+    setIsProcessing(true);
+
+    try {
+      const lines = pastedData.trim().split('\n').filter(line => line.trim());
+      
+      console.log(`=== IMPORTAÇÃO MANUAL ${selectedBank.toUpperCase()} ===`);
+      console.log('Total de linhas coladas:', lines.length);
+
+      if (isCardTransaction) {
+        // ===== PROCESSAR CARTÕES DE CRÉDITO =====
+        if (!onCardTransactionsImported) {
+          alert('⚠️ Função de importação de cartões não configurada');
+          return;
+        }
+
+        const faturaId = `${selectedBank.toUpperCase()}_${referenceMes}`;
+        const cardTransactions = await processCardTransactions(lines, selectedBank as 'Nubank' | 'VISA' | 'MasterCard', faturaId);
+        
+        if (cardTransactions.length === 0) {
+          alert(`⚠️ Nenhuma transação válida encontrada nos dados colados do ${selectedBank}`);
+          return;
+        }
+        
+        console.log(`🎯 Enviando ${cardTransactions.length} transações coladas para SimpleDiff`);
+        await onCardTransactionsImported(cardTransactions);
+        
+        setPastedData(''); // Limpar dados após processar
+        onClose();
+      } else if (selectedBank === 'Santander') {
+        // ===== PROCESSAR SANTANDER =====
+        const importedTransactions = await processSantanderText(lines);
+        
+        if (importedTransactions.length === 0) {
+          alert('⚠️ Nenhuma transação válida encontrada nos dados colados do Santander');
+          return;
+        }
+
+        const result = await onTransactionsImported(importedTransactions);
+        
+        let message = '';
+        if (result?.success && result?.stats) {
+          const { total = 0, added = 0, duplicates = 0 } = result.stats;
+          
+          message = `✅ Importação Santander concluída!\n\n`;
+          message += `📊 ${total} transações processadas\n`;
+          message += `➕ ${added} novas transações adicionadas\n`;
+          
+          if (duplicates > 0) {
+            message += `🔄 ${duplicates} duplicatas ignoradas\n`;
+          }
+        } else {
+          message = `✅ ${importedTransactions.length} transações processadas!`;
+        }
+        
+        alert(message);
+        setPastedData(''); // Limpar dados após processar
+        onClose();
+      } else {
+        alert('⚠️ Entrada manual disponível apenas para cartões de crédito (Nubank, VISA, MasterCard) e Santander');
+      }
+    } catch (error) {
+      console.error('❌ Erro ao processar dados colados:', error);
+      alert(`❌ Erro ao processar dados: ${(error as Error).message}`);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -285,8 +625,9 @@ export function BankUpload({
             }
             
             const valor = parseValorBR(valorStr);
+            const saldoConta = cols[3]?.trim() || ''; // Coluna D - Saldo da conta
             
-            const id = generateUniqueID('INT', data, descricao_origem, valor);
+            const id = generateUniqueID('INT', data, descricao_origem, valor, saldoConta);
             
             // ✅ Verificar se já existe localmente no arquivo
             if (usedIds.has(id)) {
@@ -387,8 +728,9 @@ export function BankUpload({
             }
             
             const valor = parseBBValue(valorStr);
+            const nroDocumento = cols[3]?.replace(/^"|"$/g, '').trim() || ''; // Coluna D - Nº documento
             
-            const id = generateUniqueID('BB', data, descricao_origem, valor);
+            const id = generateUniqueID('BB', data, descricao_origem, valor, nroDocumento);
             const mes = generateMonth(data);
             const dataFormatted = convertDateFormat(data);
             
@@ -494,8 +836,9 @@ export function BankUpload({
               continue;
             }
             
-            // Gerar ID determinístico (igual ao exemplo: TON03082025LI3BHI09756501)
-            const id = generateUniqueID('TON', dataStr, descricao_origem, valor);
+            // Gerar ID determinístico usando identificador único
+            const identificador = row[4] ? String(row[4]).trim() : ''; // Coluna 4 - Identificador único
+            const id = generateUniqueID('TON', dataStr, descricao_origem, valor, identificador);
             
             // ✅ Verificar duplicatas locais
             if (usedIds.has(id)) {
@@ -599,27 +942,61 @@ export function BankUpload({
               >
                 <option value="Inter">🟠 Inter (Extrato)</option>
                 <option value="BB">🟡 Banco do Brasil (Extrato)</option>
+                <option value="Santander">🔴 Santander (Extrato - Texto)</option>
                 <option value="TON">🟢 Ton (Extrato)</option>
                 <option value="Nubank">🟣 Nubank (Fatura Cartão)</option>
                 <option value="VISA">🔵 VISA (Fatura Cartão)</option>
-                <option value="MasterCard">🔴 MasterCard (Fatura Cartão)</option>
+                <option value="MasterCard">🟴 MasterCard (Fatura Cartão)</option>
               </select>
             </div>
 
             {isCardTransaction && (
-              <div>
-                <label className="text-sm text-gray-400 block mb-2">Mês de Referência da Fatura *</label>
-                <input
-                  type="text"
-                  value={referenceMes}
-                  onChange={(e) => setReferenceMes(e.target.value)}
-                  placeholder="Ex: 2412 (Dez/2024)"
-                  className="w-full p-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-100"
-                  maxLength={4}
-                  disabled={isProcessing}
-                />
-                <p className="text-xs text-gray-500 mt-1">Formato AAMM: 2412 = dezembro/2024</p>
-              </div>
+              <>
+                <div>
+                  <label className="text-sm text-gray-400 block mb-2">Mês de Referência da Fatura *</label>
+                  <input
+                    type="text"
+                    value={referenceMes}
+                    onChange={(e) => setReferenceMes(e.target.value)}
+                    placeholder="Ex: 2412 (Dez/2024)"
+                    className="w-full p-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-100"
+                    maxLength={4}
+                    disabled={isProcessing}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Formato AAMM: 2412 = dezembro/2024</p>
+                </div>
+
+                {/* ✅ NOVO: Seletor de método de entrada para cartões */}
+                <div>
+                  <label className="text-sm text-gray-400 block mb-2">Método de Entrada:</label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setInputMethod('file')}
+                      disabled={isProcessing}
+                      className={`flex-1 p-2 rounded-lg transition-colors ${
+                        inputMethod === 'file' 
+                          ? 'bg-blue-600 text-white' 
+                          : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                      }`}
+                    >
+                      📁 Arquivo CSV
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setInputMethod('paste')}
+                      disabled={isProcessing}
+                      className={`flex-1 p-2 rounded-lg transition-colors ${
+                        inputMethod === 'paste' 
+                          ? 'bg-green-600 text-white' 
+                          : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                      }`}
+                    >
+                      📋 Colar Dados
+                    </button>
+                  </div>
+                </div>
+              </>
             )}
 
             {/* Informação importante sobre o novo fluxo */}
@@ -631,43 +1008,97 @@ export function BankUpload({
               </p>
             </div>
             
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isProcessing}
-              className={`w-full p-4 border-2 border-dashed rounded-lg transition-colors ${
-                isProcessing 
-                  ? 'border-gray-600 bg-gray-800 cursor-not-allowed'
-                  : 'border-blue-500 hover:border-blue-400 bg-blue-900/20'
-              }`}
-            >
-              <div className="text-center">
-                {isProcessing ? (
-                  <>
-                    <div className="w-8 h-8 mx-auto mb-2 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-                    <p className="text-blue-100 font-medium">Processando...</p>
-                  </>
-                ) : (
-                  <>
-                    <Upload className="w-8 h-8 mx-auto mb-2 text-blue-400" />
-                    <p className="text-blue-100 font-medium">
-                      Selecionar Arquivo {selectedBank === 'TON' ? 'Excel' : 'CSV'}
-                    </p>
-                    <p className="text-blue-300 text-sm mt-1">
-                      {isCardTransaction ? `Fatura do ${selectedBank}` : `Extrato do ${selectedBank}`}
-                    </p>
-                  </>
-                )}
+            {/* ✅ INTERFACE CONDICIONAL BASEADA NO MÉTODO */}
+            {(!isCardTransaction || inputMethod === 'file') && (
+              <>
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isProcessing}
+                  className={`w-full p-4 border-2 border-dashed rounded-lg transition-colors ${
+                    isProcessing 
+                      ? 'border-gray-600 bg-gray-800 cursor-not-allowed'
+                      : 'border-blue-500 hover:border-blue-400 bg-blue-900/20'
+                  }`}
+                >
+                  <div className="text-center">
+                    {isProcessing ? (
+                      <>
+                        <div className="w-8 h-8 mx-auto mb-2 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                        <p className="text-blue-100 font-medium">Processando...</p>
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-8 h-8 mx-auto mb-2 text-blue-400" />
+                        <p className="text-blue-100 font-medium">
+                          Selecionar Arquivo {selectedBank === 'TON' ? 'Excel' : 'CSV'}
+                        </p>
+                        <p className="text-blue-300 text-sm mt-1">
+                          {isCardTransaction ? `Fatura do ${selectedBank}` : `Extrato do ${selectedBank}`}
+                        </p>
+                      </>
+                    )}
+                  </div>
+                </button>
+                
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={selectedBank === 'TON' ? '.xlsx,.xls' : '.csv'}
+                  onChange={handleFileUpload}
+                  className="hidden"
+                  disabled={isProcessing}
+                />
+              </>
+            )}
+
+            {/* ✅ NOVA INTERFACE: Colar dados para cartões e Santander */}
+            {(isCardTransaction || selectedBank === 'Santander') && inputMethod === 'paste' && (
+              <div className="space-y-3">
+                <div>
+                  <label className="text-sm text-gray-400 block mb-2">
+                    Cole as linhas das transações (sem cabeçalho):
+                  </label>
+                  <textarea
+                    value={pastedData}
+                    onChange={(e) => setPastedData(e.target.value)}
+                    disabled={isProcessing}
+                    placeholder={selectedBank === 'Santander' 
+                      ? `Exemplo formato Santander:\nSegunda, 1 de Setembro\nPix recebido kelvia c ferreira rosa\nCrédito\n100,00\nPix enviado iolanda winterman\nDébito\n-250,00` 
+                      : `Exemplo formato ${selectedBank}:\n05/12/2024,NETFLIX,29.90\n10/12/2024,SPOTIFY,19.90\n15/12/2024,ESTORNO UBER,-15.50`}
+                    className="w-full h-32 p-3 bg-gray-700 border border-gray-600 rounded-lg text-gray-100 font-mono text-sm resize-vertical"
+                    rows={6}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    {selectedBank === 'Santander' 
+                      ? 'Formato: Cole o texto completo do extrato (data, descrição, tipo, valor em linhas separadas)' 
+                      : 'Formato: data,descrição,valor (uma transação por linha, sem cabeçalho)'
+                    }
+                  </p>
+                </div>
+
+                <button
+                  onClick={handlePasteProcess}
+                  disabled={isProcessing || !pastedData.trim()}
+                  className={`w-full p-4 rounded-lg transition-colors font-medium ${
+                    isProcessing || !pastedData.trim()
+                      ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                      : 'bg-green-600 hover:bg-green-500 text-white'
+                  }`}
+                >
+                  {isProcessing ? (
+                    <div className="flex items-center justify-center">
+                      <div className="w-5 h-5 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      Processando...
+                    </div>
+                  ) : (
+                    (() => {
+                      const { count, total } = calculatePastedDataSummary();
+                      return `🚀 Processar ${count} Transações | R$ ${formatCurrency(Math.abs(total))}`;
+                    })()
+                  )}
+                </button>
               </div>
-            </button>
-            
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept={selectedBank === 'TON' ? '.xlsx,.xls' : '.csv'}
-              onChange={handleFileUpload}
-              className="hidden"
-              disabled={isProcessing}
-            />
+            )}
             
             <div className="flex gap-3">
               <button

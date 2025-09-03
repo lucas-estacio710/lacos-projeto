@@ -13,16 +13,27 @@ export default function Login() {
     e.preventDefault()
     setLoading(true)
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    })
+    try {
+      console.log('Tentando fazer login...')
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      })
 
-    if (error) {
-      alert('Erro: ' + error.message)
-    } else {
-      router.push('/dashboard')
+      console.log('Resposta do login:', { data, error })
+
+      if (error) {
+        console.error('Erro no login:', error)
+        alert('Erro no login: ' + error.message)
+      } else if (data?.user) {
+        console.log('Login bem sucedido!')
+        router.push('/dashboard')
+      }
+    } catch (err) {
+      console.error('Erro inesperado:', err)
+      alert('Erro inesperado durante o login')
     }
+    
     setLoading(false)
   }
 

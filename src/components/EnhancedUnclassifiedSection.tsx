@@ -66,7 +66,7 @@ export function EnhancedUnclassifiedSection({
       'NEXT': 'text-green-500',
       
       // Cartões
-      'MASTERCARD': 'text-yellow-500',
+      'MASTERCARD': 'text-red-700',
       'VISA': 'text-blue-600',
       'ELO': 'text-red-300',
       'HIPERCARD': 'text-orange-500',

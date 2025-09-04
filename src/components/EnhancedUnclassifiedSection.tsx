@@ -48,6 +48,57 @@ export function EnhancedUnclassifiedSection({
 
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
   const [editingDescriptions, setEditingDescriptions] = useState<Record<string, string>>({});
+
+  // Função para gerar cores únicas para cada origem
+  const getOriginColor = (origem: string): string => {
+    const colors = {
+      // Bancos principais
+      'INTER': 'text-orange-400',
+      'ITAU': 'text-blue-400', 
+      'BRADESCO': 'text-red-400',
+      'SANTANDER': 'text-red-500',
+      'CAIXA': 'text-blue-500',
+      'BB': 'text-yellow-400',
+      'NUBANK': 'text-purple-400',
+      'C6': 'text-gray-300',
+      'ORIGINAL': 'text-green-400',
+      'NEON': 'text-cyan-400',
+      'NEXT': 'text-green-500',
+      
+      // Cartões
+      'MASTERCARD': 'text-yellow-500',
+      'VISA': 'text-blue-600',
+      'ELO': 'text-red-300',
+      'HIPERCARD': 'text-orange-500',
+      'AMERICAN': 'text-green-600',
+      
+      // Outros
+      'PIX': 'text-pink-400',
+      'TED': 'text-indigo-400',
+      'DOC': 'text-teal-400',
+      'BOLETO': 'text-amber-400',
+      'DEPOSITO': 'text-lime-400',
+      'SAQUE': 'text-rose-400',
+      
+      // Default para origens não mapeadas
+      'DEFAULT': 'text-gray-400'
+    };
+
+    // Busca exata primeiro
+    if (colors[origem]) {
+      return colors[origem];
+    }
+
+    // Busca parcial (para casos como "INTER PAGBANK", "NUBANK MASTERCARD", etc)
+    for (const [key, color] of Object.entries(colors)) {
+      if (origem.includes(key)) {
+        return color;
+      }
+    }
+
+    // Se não encontrar, usa cor padrão
+    return colors.DEFAULT;
+  };
   
   const handleMoveToComplexClassification = (item: Transaction | CardTransaction) => {
     if (onMoveToComplexClassification) {
@@ -153,8 +204,8 @@ export function EnhancedUnclassifiedSection({
                     </div>
                     
                     {/* Lado direito: Origem - Valor */}
-                    <div className="flex items-center gap-2 text-xs text-gray-400 flex-shrink-0">
-                      <span>{item.origem}</span>
+                    <div className="flex items-center gap-2 text-xs flex-shrink-0">
+                      <span className={getOriginColor(item.origem)}>{item.origem}</span>
                       <span className={`font-medium ${item.valor >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                         {item.valor >= 0 ? '+' : ''}R$ {formatCurrency(Math.abs(item.valor || 0))}
                       </span>

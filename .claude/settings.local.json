@@ -15,7 +15,17 @@
       "Bash(npx next:*)",
       "Bash(git restore:*)",
       "Bash(npm install:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Read(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\database\\migrations/**)",
+      "Read(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\src\\lib/**)",
+      "Read(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app/**)",
+      "Read(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app/**)",
+      "Read(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\src\\app\\login/**)",
+      "Read(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\src\\components/**)",
+      "Read(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\src\\components/**)",
+      "Read(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\src\\components/**)"
     ],
     "deny": [],
     "ask": [],

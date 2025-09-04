@@ -25,7 +25,11 @@
       "Read(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\src\\app\\login/**)",
       "Read(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\src\\components/**)",
       "Read(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\src\\components/**)",
-      "Read(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\src\\components/**)"
+      "Read(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\src\\components/**)",
+      "Bash(lsof:*)",
+      "Read(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\src\\components/**)",
+      "Read(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\src\\components/**)",
+      "Read(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\src\\hooks/**)"
     ],
     "deny": [],
     "ask": [],

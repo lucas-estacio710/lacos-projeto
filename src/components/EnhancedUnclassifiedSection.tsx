@@ -51,6 +51,8 @@ export function EnhancedUnclassifiedSection({
 
   // Função para gerar cores únicas para cada origem
   const getOriginColor = (origem: string): string => {
+    // Debug: ver se a origem está chegando
+    console.log('🎨 getOriginColor chamada com:', origem);
     const colors = {
       // Bancos principais
       'INTER': 'text-orange-400',

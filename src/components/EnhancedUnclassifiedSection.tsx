@@ -51,8 +51,6 @@ export function EnhancedUnclassifiedSection({
 
   // Função para gerar cores únicas para cada origem
   const getOriginColor = (origem: string): string => {
-    // Debug: ver se a origem está chegando
-    console.log('🎨 getOriginColor chamada com:', origem);
     const colors = {
       // Bancos principais
       'INTER': 'text-orange-400',
@@ -86,14 +84,16 @@ export function EnhancedUnclassifiedSection({
       'DEFAULT': 'text-gray-400'
     };
 
-    // Busca exata primeiro
-    if (colors[origem]) {
-      return colors[origem];
+    const origemUpper = origem.toUpperCase();
+    
+    // Busca exata primeiro (case-insensitive)
+    if (colors[origemUpper]) {
+      return colors[origemUpper];
     }
 
     // Busca parcial (para casos como "INTER PAGBANK", "NUBANK MASTERCARD", etc)
     for (const [key, color] of Object.entries(colors)) {
-      if (origem.includes(key)) {
+      if (origemUpper.includes(key)) {
         return color;
       }
     }

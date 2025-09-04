@@ -29,7 +29,13 @@
       "Bash(lsof:*)",
       "Read(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\src\\components/**)",
       "Read(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\src\\components/**)",
-      "Read(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\src\\hooks/**)"
+      "Read(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\src\\hooks/**)",
+      "Read(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\.claude/**)",
+      "Edit(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\src\\**)",
+      "Edit(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\database\\**)",
+      "Write(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\**)",
+      "MultiEdit(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\**)",
+      "Read(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\src\\app/**)"
     ],
     "deny": [],
     "ask": [],

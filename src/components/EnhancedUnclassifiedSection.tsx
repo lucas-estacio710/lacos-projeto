@@ -56,7 +56,7 @@ export function EnhancedUnclassifiedSection({
       'INTER': 'text-orange-400',
       'ITAU': 'text-blue-400', 
       'BRADESCO': 'text-red-400',
-      'SANTANDER': 'text-red-500',
+      'SANTANDER': 'text-red-400',
       'CAIXA': 'text-blue-500',
       'BB': 'text-yellow-400',
       'NUBANK': 'text-purple-400',
@@ -66,7 +66,7 @@ export function EnhancedUnclassifiedSection({
       'NEXT': 'text-green-500',
       
       // Cartões
-      'MASTERCARD': 'text-red-700',
+      'MASTERCARD': 'text-red-500',
       'VISA': 'text-blue-600',
       'ELO': 'text-red-300',
       'HIPERCARD': 'text-orange-500',

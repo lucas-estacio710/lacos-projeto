@@ -352,7 +352,7 @@ export function PlanilhaTab({ transactions }: PlanilhaTabProps) {
         <div className="bg-gray-800 rounded-lg p-4">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-semibold text-gray-100">
-              📈 DRE - Demonstração Completa por Hierarquia
+              📈 DRE - Demonstracao Completa por Hierarquia
             </h3>
             
             {/* Controles de navegação */}

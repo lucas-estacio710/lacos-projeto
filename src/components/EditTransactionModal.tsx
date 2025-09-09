@@ -477,6 +477,7 @@ export function EditCardTransactionModal({
   onSplit // ✅ NOVA PROP
 }: EditCardTransactionModalProps) {
   const { contas, categorias, subtipos, carregarTudo } = useHierarchy();
+  const [isProcessing, setIsProcessing] = useState(false);
   
   // Load hierarchy data when modal opens
   useEffect(() => {

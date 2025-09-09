@@ -2,28 +2,9 @@
 
 import { Transaction } from '@/types';
 import { CardTransaction } from '@/hooks/useCardTransactions';
+import { DatabaseConta as Conta, DatabaseCategoria as Categoria, DatabaseSubtipo as Subtipo } from '@/types/database';
 
-// ✅ TIPOS DA HIERARQUIA
-interface Conta {
-  id: string;
-  codigo: string;
-  nome: string;
-  ordem_exibicao: number;
-}
-
-interface Categoria {
-  id: string;
-  conta_id: string;
-  nome: string;
-  ordem_exibicao: number;
-}
-
-interface Subtipo {
-  id: string;
-  categoria_id: string;
-  nome: string;
-  ordem_exibicao: number;
-}
+// Note: Using proper database types instead of local interfaces
 
 // ✅ FUNÇÃO HELPER para converter legado para subtipo_id
 export const findSubtipoIdByNames = (
@@ -355,9 +336,9 @@ export const prepareBatchClassification = (
       id: transaction.id,
       transaction,
       historicSimilar: similarItems,
-      selectedConta: topMatch?.conta || '',
-      selectedCategoria: topMatch?.categoria || '',
-      selectedSubtipo: topMatch?.subtipo || '',
+      selectedConta: '', // TODO: Resolve conta from subtipo_id if needed
+      selectedCategoria: '', // TODO: Resolve categoria from subtipo_id if needed  
+      selectedSubtipo: '', // TODO: Resolve subtipo name from subtipo_id if needed
       selectedDescricao: transaction.descricao_origem || 'Sem descrição'
     };
   });

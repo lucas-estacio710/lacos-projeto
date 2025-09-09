@@ -17,7 +17,7 @@ export interface Transaction {
   reconciliation_metadata?: string;
   
   // ✅ NOVO: Apenas subtipo_id - sem campos legados
-  subtipo_id: string; // UUID do subtipo na nova hierarquia
+  subtipo_id: string | null; // UUID do subtipo na nova hierarquia (null = não classificado)
   
   // ✅ Hierarquia anexada dinamicamente pelos hooks
   hierarchy?: {
@@ -108,10 +108,11 @@ export interface InterPagSplitResult {
 export type BankType = 
   | 'Inter' 
   | 'BB' 
+  | 'Santander'
+  | 'TON'
   | 'Nubank' 
   | 'VISA' 
-  | 'MasterCard' 
-  | 'TON';
+  | 'MasterCard';
 
 export interface CategoryData {
   subtipos: string[];

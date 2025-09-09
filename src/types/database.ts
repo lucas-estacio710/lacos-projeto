@@ -120,12 +120,15 @@ export interface VisaoPlana {
   subtipo_id: string;
   subtipo_nome: string;
   subtipo_codigo: string;
+  subtipo_icone: string;
   categoria_id: string;
   categoria_nome: string;
   categoria_codigo: string;
+  categoria_icone: string;
   conta_id: string;
   conta_nome: string;
   conta_codigo: string;
+  conta_icone: string;
   caminho_completo: string; // "Pessoa Jurídica > Receitas > Vendas de Produtos"
 }
 

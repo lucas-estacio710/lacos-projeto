@@ -194,7 +194,7 @@ export function upgradeCardTransactionToNewHierarchy(
   
   return {
     ...cardTransaction,
-    subtipo_id: subtipo_id || undefined
+    subtipo_id: subtipo_id || null
   };
 }
 
@@ -215,7 +215,7 @@ export function upgradeTransactionToNewHierarchy(
   
   return {
     ...transaction,
-    subtipo_id: subtipo_id || undefined
+    subtipo_id: subtipo_id || null
   };
 }
 

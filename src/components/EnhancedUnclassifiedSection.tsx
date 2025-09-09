@@ -87,8 +87,8 @@ export function EnhancedUnclassifiedSection({
     const origemUpper = origem.toUpperCase();
     
     // Busca exata primeiro (case-insensitive)
-    if (colors[origemUpper]) {
-      return colors[origemUpper];
+    if (colors[origemUpper as keyof typeof colors]) {
+      return colors[origemUpper as keyof typeof colors];
     }
 
     // Busca parcial (para casos como "INTER PAGBANK", "NUBANK MASTERCARD", etc)

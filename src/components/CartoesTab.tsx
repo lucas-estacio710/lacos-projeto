@@ -25,10 +25,8 @@ export function CartoesTab({
 
   // ✅ Helper functions para acessar dados da hierarquia - IGUAL AO OVERVIEWTAB
   const getCardTransactionAccount = (transaction: CardTransaction): string => {
-    // PRIMEIRO: tenta hierarchy
-    if (transaction.hierarchy?.conta_codigo) {
-      return transaction.hierarchy.conta_codigo;
-    }
+    // Note: hierarchy property doesn't exist on CardTransaction type
+    // Using manual lookup via subtipo_id instead
     
     // SEGUNDO: tenta buscar via subtipo_id manualmente
     if (transaction.subtipo_id) {
@@ -49,10 +47,8 @@ export function CartoesTab({
   };
 
   const getCardTransactionCategory = (transaction: CardTransaction): string => {
-    // PRIMEIRO: tenta hierarchy
-    if (transaction.hierarchy?.categoria_nome) {
-      return transaction.hierarchy.categoria_nome;
-    }
+    // Note: hierarchy property doesn't exist on CardTransaction type
+    // Using manual lookup via subtipo_id instead
     
     // SEGUNDO: busca manual via subtipo_id
     if (transaction.subtipo_id) {
@@ -65,15 +61,13 @@ export function CartoesTab({
       }
     }
     
-    // TERCEIRO: usa campo legacy ou fallback
-    return transaction.categoria || 'SEM CATEGORIA';
+    // TERCEIRO: fallback quando não encontrar na hierarquia
+    return 'SEM CATEGORIA';
   };
 
   const getCardTransactionSubtype = (transaction: CardTransaction): string => {
-    // PRIMEIRO: tenta hierarchy
-    if (transaction.hierarchy?.subtipo_nome) {
-      return transaction.hierarchy.subtipo_nome;
-    }
+    // Note: hierarchy property doesn't exist on CardTransaction type
+    // Using manual lookup via subtipo_id instead
     
     // SEGUNDO: busca manual via subtipo_id
     if (transaction.subtipo_id) {
@@ -83,8 +77,8 @@ export function CartoesTab({
       }
     }
     
-    // TERCEIRO: usa campo legacy ou fallback
-    return transaction.subtipo || 'SEM SUBTIPO';
+    // TERCEIRO: fallback quando não encontrar na hierarquia
+    return 'SEM SUBTIPO';
   };
   
   // ✅ Helper to get category icon from hierarchy
@@ -149,7 +143,7 @@ export function CartoesTab({
     }
     // Para 'todos', não filtra por status (pending + classified + reconciled)
     
-    const matchesCartao = selectedCartao === 'todos' || t.origem === selectedCartao;
+    const matchesCartao = selectedCartao === 'todos' || t.origem.toLowerCase() === selectedCartao.toLowerCase();
     
     // Extrair mês da fatura_id para comparação
     const faturaMonth = t.fatura_id.split('_')[1] || '';
@@ -158,8 +152,8 @@ export function CartoesTab({
     const matchesSearch = !searchTerm || 
       t.descricao_origem?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       t.descricao_classificada?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      t.categoria?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      t.subtipo?.toLowerCase().includes(searchTerm.toLowerCase());
+      getCardTransactionCategory(t).toLowerCase().includes(searchTerm.toLowerCase()) ||
+      getCardTransactionSubtype(t).toLowerCase().includes(searchTerm.toLowerCase());
     
     return matchesStatus && matchesCartao && matchesMes && matchesSearch;
   });
@@ -181,7 +175,7 @@ export function CartoesTab({
   console.log('🔍 CartoesTab - Current filter:', statusFilter);
   console.log('🔍 CartoesTab - Contas encontradas:', [...new Set(transacoesClassificadas.map(t => getCardTransactionAccount(t)))]);
   console.log('🔍 CartoesTab - Sample transaction full:', transacoesClassificadas[0]);
-  console.log('🔍 CartoesTab - Transactions with hierarchy:', transacoesClassificadas.filter(t => t.hierarchy).length);
+  console.log('🔍 CartoesTab - Transactions with subtipo_id:', transacoesClassificadas.filter(t => t.subtipo_id).length);
   console.log('🔍 CartoesTab - Sample account resolution:', transacoesClassificadas.slice(0, 3).map(t => ({
     id: t.id.slice(-8),
     subtipo_id: t.subtipo_id?.slice(-8),
@@ -268,19 +262,51 @@ export function CartoesTab({
 
       {/* Filtros */}
       <div className="bg-gray-800 p-4 rounded-lg shadow-lg border border-gray-700 space-y-3">
-        {/* Seleção de Cartão */}
+        {/* Seleção de Cartão - Botões */}
         <div>
-          <label className="text-sm text-gray-400 block mb-1">Cartão:</label>
-          <select
-            value={selectedCartao}
-            onChange={(e) => setSelectedCartao(e.target.value)}
-            className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-gray-100"
-          >
-            <option value="todos">Todos os cartões</option>
-            {availableCartoes.map(cartao => (
-              <option key={cartao} value={cartao}>{cartao}</option>
-            ))}
-          </select>
+          <label className="text-sm text-gray-400 block mb-2">Cartão:</label>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <button
+              onClick={() => setSelectedCartao('todos')}
+              className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                selectedCartao === 'todos'
+                  ? 'bg-gray-600 text-white shadow-lg'
+                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              }`}
+            >
+              Todos
+            </button>
+            <button
+              onClick={() => setSelectedCartao('nubank')}
+              className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                selectedCartao.toLowerCase() === 'nubank'
+                  ? 'bg-purple-600 text-white shadow-lg'
+                  : 'bg-purple-900/30 text-purple-300 hover:bg-purple-800/50 border border-purple-700'
+              }`}
+            >
+              Nubank
+            </button>
+            <button
+              onClick={() => setSelectedCartao('visa')}
+              className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                selectedCartao.toLowerCase() === 'visa'
+                  ? 'bg-blue-600 text-white shadow-lg'
+                  : 'bg-blue-900/30 text-blue-300 hover:bg-blue-800/50 border border-blue-700'
+              }`}
+            >
+              Visa
+            </button>
+            <button
+              onClick={() => setSelectedCartao('mastercard')}
+              className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                selectedCartao.toLowerCase() === 'mastercard'
+                  ? 'bg-red-700 text-white shadow-lg'
+                  : 'bg-red-900/30 text-red-300 hover:bg-red-800/50 border border-red-700'
+              }`}
+            >
+              MasterCard
+            </button>
+          </div>
         </div>
 
         {/* Seleção de Mês */}

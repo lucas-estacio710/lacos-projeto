@@ -19,7 +19,6 @@ interface SimpleBillDiffModalProps {
   onClose: () => void;
   onApply: (changes: BillChanges) => void;
   onCancel: () => void;
-  onReplaceAll?: () => void;
 }
 
 interface DiffItem {
@@ -38,8 +37,7 @@ export function SimpleBillDiffModal({
   newBill,
   onClose,
   onApply,
-  onCancel,
-  onReplaceAll
+  onCancel
 }: SimpleBillDiffModalProps) {
   const [leftItems, setLeftItems] = useState<DiffItem[]>([]);   // Coluna da esquerda (existentes)
   const [rightItems, setRightItems] = useState<DiffItem[]>([]); // Coluna da direita (novas)
@@ -123,17 +121,21 @@ export function SimpleBillDiffModal({
         });
         
         if (bestMatchItem !== null && bestMatchSimilarity > 0) {
+          // Explicit type assertions to fix TypeScript inference issues
+          const matchedItem = bestMatchItem as DiffItem;
+          const currentRightItem = rightItem as DiffItem;
+          
           // Marcar como matched
-          rightItem.matchedWith = bestMatchItem.transaction.id;
-          rightItem.similarity = bestMatchSimilarity;
-          rightItem.selected = false; // ✅ MATCH PERFEITO = desmarcada por padrão na nova
+          currentRightItem.matchedWith = matchedItem.transaction.id;
+          currentRightItem.similarity = bestMatchSimilarity;
+          currentRightItem.selected = false; // ✅ MATCH PERFEITO = desmarcada por padrão na nova
           
-          bestMatchItem.matchedWith = rightItem.transaction.id;
-          bestMatchItem.similarity = bestMatchSimilarity;
+          matchedItem.matchedWith = currentRightItem.transaction.id;
+          matchedItem.similarity = bestMatchSimilarity;
           
-          usedLeftItems.add(bestMatchItem.key); // Marcar como usado
+          usedLeftItems.add(matchedItem.key); // Marcar como usado
           
-          console.log(`🔗 Match encontrado: ${rightItem.transaction.descricao_origem.substring(0, 30)} (${Math.round(bestMatchSimilarity * 100)}%)`);
+          console.log(`🔗 Match encontrado: ${currentRightItem.transaction.descricao_origem.substring(0, 30)} (${Math.round(bestMatchSimilarity * 100)}%)`);
         }
       });
     }
@@ -431,14 +433,6 @@ export function SimpleBillDiffModal({
               >
                 ❌ Cancelar
               </button>
-              {onReplaceAll && (
-                <button
-                  onClick={onReplaceAll}
-                  className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded text-xs md:text-sm"
-                >
-                  🔄 Substituir Tudo
-                </button>
-              )}
               <button
                 onClick={handleApply}
                 className="px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white rounded font-medium text-xs md:text-sm"

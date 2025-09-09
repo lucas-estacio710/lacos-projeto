@@ -92,6 +92,15 @@ export function NavigationTabs({
       bgStyle: 'bg-teal-900/30 border border-teal-600',
       activeStyle: 'bg-gradient-to-r from-teal-600 to-teal-800',
       textColor: 'text-teal-100'
+    },
+    {
+      id: 'planilha',
+      label: '📊 Planilha',
+      badge: null,
+      highlight: false,
+      bgStyle: 'bg-indigo-900/30 border border-indigo-600',
+      activeStyle: 'bg-gradient-to-r from-indigo-600 to-indigo-800',
+      textColor: 'text-indigo-100'
     }
   ];
 

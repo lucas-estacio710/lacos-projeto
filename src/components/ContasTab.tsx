@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Transaction, countsInBalance } from '@/types';
 
 interface ContasTabProps {
@@ -6,6 +6,8 @@ interface ContasTabProps {
 }
 
 export function ContasTab({ transactions }: ContasTabProps) {
+  const [expandedBanco, setExpandedBanco] = useState<string | null>(null);
+
   const formatCurrency = (value: number) => {
     return value.toLocaleString('pt-BR', {
       minimumFractionDigits: 2,
@@ -47,6 +49,21 @@ export function ContasTab({ transactions }: ContasTabProps) {
       .sort((a, b) => b.data.localeCompare(a.data));
     
     return bankTransactions.length > 0 ? bankTransactions[0].data : null;
+  };
+
+  // ✅ NOVA FUNÇÃO: Obter transações do último dia registrado para um banco
+  const getLastDayTransactions = (banco: string) => {
+    const lastDate = getLastTransactionDate(banco);
+    if (!lastDate) return [];
+
+    return transactions
+      .filter(t => t.cc === banco && t.data === lastDate)
+      .sort((a, b) => b.data.localeCompare(a.data));
+  };
+
+  // ✅ FUNÇÃO: Toggle expansão do banco
+  const toggleBancoExpansion = (bancoCodigo: string) => {
+    setExpandedBanco(expandedBanco === bancoCodigo ? null : bancoCodigo);
   };
 
   // Função para formatar data
@@ -156,49 +173,101 @@ export function ContasTab({ transactions }: ContasTabProps) {
 
       {/* Saldos em Formato Horizontal */}
       <div className="space-y-3">
-        {saldos.map((banco, index) => (
-          <div
-            key={banco.codigo}
-            className={`bg-gradient-to-r ${banco.cor} p-4 rounded-lg shadow-lg hover:shadow-xl transition-all duration-300`}
-          >
-            <div className="flex items-center justify-between">
-              {/* Lado Esquerdo: Ícone + Nome */}
-              <div className="flex items-center gap-3">
-                <div className="text-2xl">
-                  {banco.icone}
-                </div>
-                <h3 className={`font-semibold ${banco.corTexto} text-sm`}>
-                  {banco.nome}
-                </h3>
-              </div>
-              
-              {/* Lado Direito: Data + Saldos */}
-              <div className="flex items-center gap-2 md:gap-4 text-right">
-                {/* Data */}
-                <div className={`text-xs ${banco.corTexto} opacity-75`}>
-                  {banco.lastTransactionDate ? (
-                    <>{formatDate(banco.lastTransactionDate)}</>
-                  ) : (
-                    <>Sem movimentação</>
-                  )}
-                </div>
-                
-                {/* Saldos - Móvel e Desktop */}
-                <div className="flex flex-col items-end gap-1">
-                  {/* Saldo Real (s+p) - Principal */}
-                  <div className={`${banco.corTexto} font-bold text-base md:text-lg min-w-[80px] md:min-w-[100px]`}>
-                    R$ {formatCurrency(Math.abs(banco.saldo))}
+        {saldos.map((banco, index) => {
+          const isExpanded = expandedBanco === banco.codigo;
+          const lastDayTransactions = getLastDayTransactions(banco.codigo);
+          
+          return (
+            <div key={banco.codigo} className="space-y-2">
+              {/* Box clicável do saldo */}
+              <div
+                onClick={() => toggleBancoExpansion(banco.codigo)}
+                className={`bg-gradient-to-r ${banco.cor} p-4 rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 cursor-pointer transform hover:scale-[1.02]`}
+              >
+                <div className="flex items-center justify-between">
+                  {/* Lado Esquerdo: Ícone + Nome */}
+                  <div className="flex items-center gap-3">
+                    <div className="text-2xl">
+                      {banco.icone}
+                    </div>
+                    <h3 className={`font-semibold ${banco.corTexto} text-sm`}>
+                      {banco.nome}
+                    </h3>
+                    {/* Indicador de expansão */}
+                    <div className={`${banco.corTexto} text-lg transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}>
+                      ▼
+                    </div>
                   </div>
                   
-                  {/* Saldo Classificado (s) - Menor */}
-                  <div className={`${banco.corTexto} text-xs opacity-75`}>
-                    Classif.: R$ {formatCurrency(Math.abs(banco.saldoRealizado))}
+                  {/* Lado Direito: Data + Saldos */}
+                  <div className="flex items-center gap-2 md:gap-4 text-right">
+                    {/* Data */}
+                    <div className={`text-xs ${banco.corTexto} opacity-75`}>
+                      {banco.lastTransactionDate ? (
+                        <>{formatDate(banco.lastTransactionDate)}</>
+                      ) : (
+                        <>Sem movimentação</>
+                      )}
+                    </div>
+                    
+                    {/* Saldos - Móvel e Desktop */}
+                    <div className="flex flex-col items-end gap-1">
+                      {/* Saldo Real (s+p) - Principal */}
+                      <div className={`${banco.corTexto} font-bold text-base md:text-lg min-w-[80px] md:min-w-[100px]`}>
+                        R$ {formatCurrency(Math.abs(banco.saldo))}
+                      </div>
+                      
+                      {/* Saldo Classificado (s) - Menor */}
+                      <div className={`${banco.corTexto} text-xs opacity-75`}>
+                        Classif.: R$ {formatCurrency(Math.abs(banco.saldoRealizado))}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
+
+              {/* Seção expandida com transações do último dia */}
+              {isExpanded && (
+                <div className="bg-gray-800 rounded-lg p-4 border-l-4 border-gray-600">
+                  <h4 className="text-white font-medium mb-3 flex items-center gap-2">
+                    📅 Lançamentos de {banco.lastTransactionDate ? formatDate(banco.lastTransactionDate) : 'N/A'}
+                    <span className="text-gray-400 text-sm">({lastDayTransactions.length} transações)</span>
+                  </h4>
+                  
+                  {lastDayTransactions.length > 0 ? (
+                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                      {lastDayTransactions.map((transaction) => (
+                        <div
+                          key={transaction.id}
+                          className="bg-gray-700 rounded p-3 flex items-center justify-between hover:bg-gray-600 transition-colors"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="text-white text-sm font-medium truncate">
+                              {transaction.descricao}
+                            </div>
+                            <div className="text-gray-400 text-xs mt-1 flex gap-2">
+                              <span>{transaction.realizado === 's' ? '✅ Realizado' : transaction.realizado === 'p' ? '⏳ Previsto' : '🔄 Reconciliado'}</span>
+                              {transaction.origem && <span>• {transaction.origem}</span>}
+                            </div>
+                          </div>
+                          <div className="flex-shrink-0 ml-3">
+                            <div className={`font-bold text-sm ${transaction.valor >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                              {transaction.valor >= 0 ? '+' : ''}R$ {formatCurrency(Math.abs(transaction.valor))}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-gray-400 text-sm italic">
+                      Nenhuma transação encontrada para este dia
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

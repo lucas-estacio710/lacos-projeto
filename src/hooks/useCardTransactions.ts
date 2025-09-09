@@ -373,11 +373,24 @@ export function useCardTransactions() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Usuário não autenticado');
 
+      // ✅ Enviar apenas os campos que existem na tabela card_transactions
       const transactionToUpdate = {
-        ...updatedTransaction,
-        updated_at: new Date().toISOString(),
-        status: updatedTransaction.subtipo_id ? 'classified' : 'pending'
+        id: updatedTransaction.id,
+        user_id: user.id, // Sempre usar o user_id atual
+        fatura_id: updatedTransaction.fatura_id,
+        data_transacao: updatedTransaction.data_transacao,
+        descricao_origem: updatedTransaction.descricao_origem,
+        valor: updatedTransaction.valor,
+        origem: updatedTransaction.origem,
+        descricao_classificada: updatedTransaction.descricao_classificada,
+        status: updatedTransaction.subtipo_id ? 'classified' : 'pending',
+        cc: updatedTransaction.cc,
+        fingerprint: updatedTransaction.fingerprint,
+        subtipo_id: updatedTransaction.subtipo_id,
+        updated_at: new Date().toISOString()
       };
+      
+      console.log('📤 Enviando para Supabase:', transactionToUpdate);
 
       const { data, error: supabaseError } = await supabase
         .from('card_transactions')
@@ -396,6 +409,13 @@ export function useCardTransactions() {
       return data;
     } catch (err) {
       console.error('Erro ao atualizar transação de cartão:', err);
+      console.error('Dados que estavam sendo enviados:', {
+        id: updatedTransaction.id,
+        subtipo_id: updatedTransaction.subtipo_id,
+        descricao_classificada: updatedTransaction.descricao_classificada,
+        status: updatedTransaction.subtipo_id ? 'classified' : 'pending'
+      });
+      console.error('Erro completo:', JSON.stringify(err, null, 2));
       throw err;
     }
   };

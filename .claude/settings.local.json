@@ -35,7 +35,9 @@
       "Edit(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\database\\**)",
       "Write(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\**)",
       "MultiEdit(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\**)",
-      "Read(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\src\\app/**)"
+      "Read(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\src\\app/**)",
+      "Bash(npx create-next-app:*)",
+      "Read(/C:\\Users\\kel_v\\rip-pet-html/**)"
     ],
     "deny": [],
     "ask": [],

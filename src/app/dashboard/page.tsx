@@ -20,6 +20,7 @@ import { InboxTab } from '@/components/InboxTab';
 import { OverviewTab } from '@/components/OverviewTab';
 import { AnalyticsTab } from '@/components/AnalyticsTab';
 import { ContasTab } from '@/components/ContasTab';
+import { PlanilhaTab } from '@/components/PlanilhaTab';
 import { CartoesTab } from '@/components/CartoesTab';
 import ComplexClassificationTab from '@/components/ComplexClassificationTab'; // ✅ IMPORT CORRIGIDO
 import { EditTransactionModal } from '@/components/EditTransactionModal';
@@ -49,7 +50,6 @@ export default function DashboardPage() {
     updateMultipleCardTransactions,
     deleteCardTransaction,
     applySimpleDiffChanges,
-    replaceFaturaComplete,
     splitCardTransaction,
     markAsReconciled,
     getTransactionsForReconciliation
@@ -406,33 +406,6 @@ export default function DashboardPage() {
     }
   };
 
-  const handleSimpleDiffReplaceAll = async () => {
-    if (!simpleDiffData) return;
-    
-    try {
-      console.log('📄 Substituindo fatura completa...');
-      
-      const result = await replaceFaturaComplete(
-        simpleDiffData.faturaId,
-        simpleDiffData.newBill
-      );
-      
-      if (result.success) {
-        alert(`✅ Fatura substituída completamente!\n\n` +
-              `📋 ${simpleDiffData.newBill.length} transações importadas\n` +
-              `📄 Fatura: ${simpleDiffData.faturaId}`);
-      } else {
-        throw new Error('Falha na substituição');
-      }
-      
-      setShowSimpleDiff(false);
-      setSimpleDiffData(null);
-      
-    } catch (error) {
-      console.error('⛔ Erro na substituição:', error);
-      alert('⛔ Erro ao substituir fatura');
-    }
-  };
 
   const handleSimpleDiffCancel = () => {
     console.log('⛔ Importação cancelada pelo usuário');
@@ -873,6 +846,10 @@ export default function DashboardPage() {
               <ContasTab transactions={transactions} />
             )}
 
+            {activeTab === 'planilha' && (
+              <PlanilhaTab transactions={transactions} />
+            )}
+
           </>
         )}
 
@@ -940,7 +917,6 @@ export default function DashboardPage() {
             }}
             onApply={handleSimpleDiffApply}
             onCancel={handleSimpleDiffCancel}
-            onReplaceAll={handleSimpleDiffReplaceAll}
           />
         )}
       </div>

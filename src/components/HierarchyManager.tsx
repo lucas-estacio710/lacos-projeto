@@ -207,7 +207,7 @@ export const HierarchyManager: React.FC<HierarchyManagerProps> = ({
                 </div>
 
                 {/* Conteúdo específico de cada miniaplicação */}
-                <div className="bg-gray-800 rounded-lg p-4 md:p-6 min-h-[300px] md:min-h-[400px]">
+                <div className="bg-gray-800 rounded-lg p-4 md:p-6 min-h-[500px] md:min-h-[600px]">
                   {renderAppContent(selectedApp, { 
                     hierarquia, 
                     loading, 
@@ -1170,61 +1170,63 @@ function EditApp({ contas, categorias, subtipos, editingItem, setEditingItem, ed
   }
 
   return (
-    <div className="h-full">
+    <div className="h-full flex flex-col">
       <div className="mb-4">
         <h3 className="text-base md:text-lg font-medium text-white mb-2">Editor de Propriedades</h3>
         <p className="text-sm text-gray-400">Selecione um item para editar suas propriedades</p>
       </div>
 
-      <div className="space-y-6">
-        {/* Contas */}
-        <div>
-          <h4 className="text-sm font-medium text-gray-300 mb-3 flex items-center gap-2">
-            <Building2 className="w-4 h-4" />
+      {/* Layout em 3 colunas */}
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-4 h-full">
+        
+        {/* Coluna Contas */}
+        <div className="flex flex-col bg-gray-900/50 rounded-lg p-3">
+          <h4 className="text-sm font-medium text-gray-300 mb-3 flex items-center gap-2 sticky top-0 bg-gray-900/50 pb-2">
+            <Building2 className="w-4 h-4 text-blue-400" />
             Contas ({contas?.length || 0})
           </h4>
-          <div className="space-y-2 max-h-32 overflow-y-auto">
+          <div className="flex-1 space-y-1.5 overflow-y-auto pr-1">
             {contas?.map(conta => (
               <div
                 key={conta.id}
                 onClick={() => handleSelectItem(conta, 'conta')}
-                className="bg-gray-800 rounded-md p-3 cursor-pointer hover:bg-gray-750 transition-colors"
+                className="bg-gray-800 rounded-md p-2.5 cursor-pointer hover:bg-blue-900/30 hover:border hover:border-blue-600 transition-all group"
               >
                 <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-white font-medium">{conta.nome}</div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-white font-medium text-sm truncate" title={conta.nome}>{conta.nome}</div>
                     <div className="text-xs text-gray-400">{conta.codigo}</div>
                   </div>
-                  <Edit3 className="w-4 h-4 text-orange-400" />
+                  <Edit3 className="w-3.5 h-3.5 text-orange-400 group-hover:text-orange-300 flex-shrink-0 ml-2" />
                 </div>
               </div>
             ))}
           </div>
         </div>
 
-        {/* Categorias */}
-        <div>
-          <h4 className="text-sm font-medium text-gray-300 mb-3 flex items-center gap-2">
-            <Folder className="w-4 h-4" />
+        {/* Coluna Categorias */}
+        <div className="flex flex-col bg-gray-900/50 rounded-lg p-3">
+          <h4 className="text-sm font-medium text-gray-300 mb-3 flex items-center gap-2 sticky top-0 bg-gray-900/50 pb-2">
+            <Folder className="w-4 h-4 text-green-400" />
             Categorias ({categorias?.length || 0})
           </h4>
-          <div className="space-y-2 max-h-32 overflow-y-auto">
+          <div className="flex-1 space-y-1.5 overflow-y-auto pr-1">
             {categorias?.map(categoria => {
               const conta = contas?.find(c => c.id === categoria.conta_id);
               return (
                 <div
                   key={categoria.id}
                   onClick={() => handleSelectItem(categoria, 'categoria')}
-                  className="bg-gray-800 rounded-md p-3 cursor-pointer hover:bg-gray-750 transition-colors"
+                  className="bg-gray-800 rounded-md p-2.5 cursor-pointer hover:bg-green-900/30 hover:border hover:border-green-600 transition-all group"
                 >
                   <div className="flex items-center justify-between">
-                    <div>
-                      <div className="text-white font-medium">{categoria.nome}</div>
-                      <div className="text-xs text-gray-400">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-white font-medium text-sm truncate" title={categoria.nome}>{categoria.nome}</div>
+                      <div className="text-xs text-gray-400 truncate">
                         {categoria.codigo} • {conta?.nome}
                       </div>
                     </div>
-                    <Edit3 className="w-4 h-4 text-orange-400" />
+                    <Edit3 className="w-3.5 h-3.5 text-orange-400 group-hover:text-orange-300 flex-shrink-0 ml-2" />
                   </div>
                 </div>
               );
@@ -1232,13 +1234,13 @@ function EditApp({ contas, categorias, subtipos, editingItem, setEditingItem, ed
           </div>
         </div>
 
-        {/* Subtipos */}
-        <div>
-          <h4 className="text-sm font-medium text-gray-300 mb-3 flex items-center gap-2">
-            <Tag className="w-4 h-4" />
+        {/* Coluna Subtipos */}
+        <div className="flex flex-col bg-gray-900/50 rounded-lg p-3">
+          <h4 className="text-sm font-medium text-gray-300 mb-3 flex items-center gap-2 sticky top-0 bg-gray-900/50 pb-2">
+            <Tag className="w-4 h-4 text-purple-400" />
             Subtipos ({subtipos?.length || 0})
           </h4>
-          <div className="space-y-2 max-h-40 overflow-y-auto">
+          <div className="flex-1 space-y-1.5 overflow-y-auto pr-1">
             {subtipos?.map(subtipo => {
               const categoria = categorias?.find(c => c.id === subtipo.categoria_id);
               const conta = contas?.find(c => c.id === categoria?.conta_id);
@@ -1246,16 +1248,105 @@ function EditApp({ contas, categorias, subtipos, editingItem, setEditingItem, ed
                 <div
                   key={subtipo.id}
                   onClick={() => handleSelectItem(subtipo, 'subtipo')}
-                  className="bg-gray-800 rounded-md p-3 cursor-pointer hover:bg-gray-750 transition-colors"
+                  className="bg-gray-800 rounded-md p-2.5 cursor-pointer hover:bg-purple-900/30 hover:border hover:border-purple-600 transition-all group"
                 >
                   <div className="flex items-center justify-between">
-                    <div>
-                      <div className="text-white font-medium">{subtipo.nome}</div>
-                      <div className="text-xs text-gray-400">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-white font-medium text-sm truncate" title={subtipo.nome}>{subtipo.nome}</div>
+                      <div className="text-xs text-gray-400 truncate" title={`${subtipo.codigo} • ${conta?.nome} → ${categoria?.nome}`}>
                         {subtipo.codigo} • {conta?.nome} → {categoria?.nome}
                       </div>
                     </div>
-                    <Edit3 className="w-4 h-4 text-orange-400" />
+                    <Edit3 className="w-3.5 h-3.5 text-orange-400 group-hover:text-orange-300 flex-shrink-0 ml-2" />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+      
+      {/* Responsive: Mobile - Lista vertical */}
+      <div className="lg:hidden flex-1 space-y-4 overflow-y-auto">
+        {/* Contas Mobile */}
+        <div className="bg-gray-900/50 rounded-lg p-3">
+          <h4 className="text-sm font-medium text-gray-300 mb-3 flex items-center gap-2">
+            <Building2 className="w-4 h-4 text-blue-400" />
+            Contas ({contas?.length || 0})
+          </h4>
+          <div className="space-y-1.5 max-h-48 overflow-y-auto">
+            {contas?.map(conta => (
+              <div
+                key={conta.id}
+                onClick={() => handleSelectItem(conta, 'conta')}
+                className="bg-gray-800 rounded-md p-2.5 cursor-pointer hover:bg-blue-900/30 transition-all"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-white font-medium text-sm">{conta.nome}</div>
+                    <div className="text-xs text-gray-400">{conta.codigo}</div>
+                  </div>
+                  <Edit3 className="w-3.5 h-3.5 text-orange-400" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Categorias Mobile */}
+        <div className="bg-gray-900/50 rounded-lg p-3">
+          <h4 className="text-sm font-medium text-gray-300 mb-3 flex items-center gap-2">
+            <Folder className="w-4 h-4 text-green-400" />
+            Categorias ({categorias?.length || 0})
+          </h4>
+          <div className="space-y-1.5 max-h-48 overflow-y-auto">
+            {categorias?.map(categoria => {
+              const conta = contas?.find(c => c.id === categoria.conta_id);
+              return (
+                <div
+                  key={categoria.id}
+                  onClick={() => handleSelectItem(categoria, 'categoria')}
+                  className="bg-gray-800 rounded-md p-2.5 cursor-pointer hover:bg-green-900/30 transition-all"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-white font-medium text-sm">{categoria.nome}</div>
+                      <div className="text-xs text-gray-400 truncate">
+                        {categoria.codigo} • {conta?.nome}
+                      </div>
+                    </div>
+                    <Edit3 className="w-3.5 h-3.5 text-orange-400" />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Subtipos Mobile */}
+        <div className="bg-gray-900/50 rounded-lg p-3">
+          <h4 className="text-sm font-medium text-gray-300 mb-3 flex items-center gap-2">
+            <Tag className="w-4 h-4 text-purple-400" />
+            Subtipos ({subtipos?.length || 0})
+          </h4>
+          <div className="space-y-1.5 max-h-64 overflow-y-auto">
+            {subtipos?.map(subtipo => {
+              const categoria = categorias?.find(c => c.id === subtipo.categoria_id);
+              const conta = contas?.find(c => c.id === categoria?.conta_id);
+              return (
+                <div
+                  key={subtipo.id}
+                  onClick={() => handleSelectItem(subtipo, 'subtipo')}
+                  className="bg-gray-800 rounded-md p-2.5 cursor-pointer hover:bg-purple-900/30 transition-all"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-white font-medium text-sm">{subtipo.nome}</div>
+                      <div className="text-xs text-gray-400 truncate">
+                        {subtipo.codigo} • {conta?.nome} → {categoria?.nome}
+                      </div>
+                    </div>
+                    <Edit3 className="w-3.5 h-3.5 text-orange-400" />
                   </div>
                 </div>
               );

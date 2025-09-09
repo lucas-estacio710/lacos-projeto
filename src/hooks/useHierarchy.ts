@@ -135,12 +135,15 @@ export function useHierarchy() {
         subtipo_id: item.subtipo_id,
         subtipo_nome: item.subtipo_nome,
         subtipo_codigo: item.subtipo_codigo,
+        subtipo_icone: item.subtipo_icone,
         categoria_id: item.categoria_id,
         categoria_nome: item.categoria_nome,
         categoria_codigo: item.categoria_codigo,
+        categoria_icone: item.categoria_icone,
         conta_id: item.conta_id,
         conta_nome: item.conta_nome,
         conta_codigo: item.conta_codigo,
+        conta_icone: item.conta_icone,
         caminho_completo: item.caminho_completo
       }));
 
@@ -192,7 +195,7 @@ export function useHierarchy() {
         p_codigo: data.codigo,
         p_nome: data.nome,
         p_icone: data.icone,
-        p_ativo: data.ativo,
+        p_ativo: true,
         p_ordem_exibicao: data.ordem_exibicao
       });
 

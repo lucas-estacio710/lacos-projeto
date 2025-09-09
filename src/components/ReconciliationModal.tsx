@@ -5,7 +5,7 @@ import { Transaction } from '@/types';
 import { CardTransaction } from '@/hooks/useCardTransactions';
 import { formatCurrency, formatMonth, formatDate } from '@/lib/utils';
 import { useHierarchy } from '@/hooks/useHierarchy';
-import { getTransactionHierarchy } from '@/lib/hierarchyHelpers';
+import { getCardTransactionHierarchy } from '@/lib/hierarchyHelpers';
 
 interface ReconciliationModalProps {
   isOpen: boolean;
@@ -34,7 +34,7 @@ export function ReconciliationModal({
   const [selectAll, setSelectAll] = useState(true);
   
   // Hook para acessar hierarquia
-  const { contas, categorias, subtipos, carregarTudo } = useHierarchy();
+  const { contas, categorias, subtipos, visaoPlana, carregarTudo } = useHierarchy();
 
   // Carregar hierarquia quando modal abre
   useEffect(() => {
@@ -332,7 +332,7 @@ export function ReconciliationModal({
                           <p className="text-xs text-gray-400">
                             {formatDate(cardTx.data_transacao)}
                             {cardTx.subtipo_id && (() => {
-                              const hierarchy = getTransactionHierarchy(cardTx, contas, categorias, subtipos);
+                              const hierarchy = getCardTransactionHierarchy(cardTx as any, visaoPlana);
                               return hierarchy ? (
                                 <span className="text-blue-400 ml-2">
                                   • {hierarchy.categoria_nome} → {hierarchy.subtipo_nome}

@@ -1,17 +1,19 @@
 // components/OverviewTab.tsx - VERSÃO COM PERÍODOS AGRUPADOS
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Calendar, Search, TrendingUp, BarChart3, ChevronDown, ChevronUp } from 'lucide-react';
+import { Calendar, Search, TrendingUp, BarChart3, ChevronDown, ChevronUp, CheckSquare, Square } from 'lucide-react';
 import { Transaction, countsInBalance } from '@/types';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useHierarchy } from '@/hooks/useHierarchy';
 import { CategorySection } from './CategorySection';
 import { SummaryBox } from './SummaryBox';
 import { formatCurrency, formatDate } from '@/lib/utils';
+import { getQuickActionCategories } from '@/lib/smartClassification';
 
 interface OverviewTabProps {
   transactions: Transaction[];
   onEditTransaction: (transaction: Transaction) => void;
+  onUpdateTransaction?: (transaction: Transaction) => Promise<void>;
 }
 
 // Tipo para agrupamento de períodos
@@ -27,9 +29,10 @@ interface PeriodItem {
   isAggregate: boolean;
 }
 
-export function OverviewTab({ 
-  transactions, 
-  onEditTransaction
+export function OverviewTab({
+  transactions,
+  onEditTransaction,
+  onUpdateTransaction
 }: OverviewTabProps) {
   const { getAllAccountTypes, customAccounts } = useConfig();
   const { contas, categorias, subtipos: hierarchySubtipos, carregarTudo } = useHierarchy();
@@ -101,6 +104,15 @@ export function OverviewTab({
   const [expandedSubtypes, setExpandedSubtypes] = useState<Record<string, boolean>>({});
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
+  // Estados para MassiveChangeSubtipo
+  const [massiveChangeMode, setMassiveChangeMode] = useState(true);
+  const [selectedTransactions, setSelectedTransactions] = useState<Set<string>>(new Set());
+  const [massiveChangeSubtipo, setMassiveChangeSubtipo] = useState('');
+  const [massiveChangeDescricao, setMassiveChangeDescricao] = useState('');
+  const [isApplyingChanges, setIsApplyingChanges] = useState(false);
+  // Descrições individuais: { transactionId: customDescription }
+  const [individualDescriptions, setIndividualDescriptions] = useState<Record<string, string>>({});
+
   const toggleCategory = (categoria: string) => {
     setExpandedCategories(prev => ({
       ...prev,
@@ -113,6 +125,131 @@ export function OverviewTab({
       ...prev,
       [key]: !prev[key]
     }));
+  };
+
+  // Funções para MassiveChangeSubtipo
+  const toggleTransactionSelection = (transactionId: string) => {
+    setSelectedTransactions(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(transactionId)) {
+        newSet.delete(transactionId);
+      } else {
+        newSet.add(transactionId);
+      }
+      return newSet;
+    });
+  };
+
+  const clearSelection = () => {
+    setSelectedTransactions(new Set());
+    setMassiveChangeSubtipo('');
+    setMassiveChangeDescricao('');
+    setIndividualDescriptions({});
+  };
+
+  const updateIndividualDescription = (transactionId: string, description: string) => {
+    setIndividualDescriptions(prev => ({
+      ...prev,
+      [transactionId]: description
+    }));
+  };
+
+  const applyMassiveChange = async () => {
+    if (selectedTransactions.size === 0 || !massiveChangeSubtipo) {
+      alert('Selecione transações e um subtipo antes de aplicar');
+      return;
+    }
+
+    if (!onUpdateTransaction) {
+      alert('Função de atualização não disponível');
+      return;
+    }
+
+    if (isApplyingChanges) {
+      return; // Evitar cliques duplos
+    }
+
+    // Buscar o subtipo_id baseado no nome selecionado
+    const selectedSubtipoObj = hierarchySubtipos.find(s => s.nome === massiveChangeSubtipo);
+    if (!selectedSubtipoObj) {
+      alert('Subtipo selecionado não encontrado na hierarquia');
+      return;
+    }
+
+    const confirmMessage = `Deseja alterar ${selectedTransactions.size} transações para:\n` +
+                          `Subtipo: ${massiveChangeSubtipo}\n` +
+                          `Descrição: ${massiveChangeDescricao || '(manter atual)'}`;
+
+    if (!confirm(confirmMessage)) return;
+
+    setIsApplyingChanges(true);
+
+    try {
+      let successCount = 0;
+      let errorCount = 0;
+      const errors: string[] = [];
+
+      // Processar cada transação selecionada
+      for (const transactionId of selectedTransactions) {
+        try {
+          const transaction = transactions.find(t => t.id === transactionId);
+          if (!transaction) {
+            errors.push(`Transação ${transactionId} não encontrada`);
+            errorCount++;
+            continue;
+          }
+
+          // Determinar descrição a usar seguindo a hierarquia:
+          // 1. Descrição individual (se existe)
+          // 2. Descrição do lote (se preenchida)
+          // 3. Descrição original da transação
+          const finalDescription =
+            individualDescriptions[transactionId] || // Descrição individual tem prioridade
+            massiveChangeDescricao ||                 // Depois descrição do lote
+            transaction.descricao;                    // Por último, manter original
+
+          const updatedTransaction: Transaction = {
+            ...transaction,
+            subtipo_id: selectedSubtipoObj.id,
+            descricao: finalDescription,
+            realizado: 's' // Marcar como classificada
+          };
+
+          await onUpdateTransaction(updatedTransaction);
+          successCount++;
+
+        } catch (error) {
+          console.error(`Erro ao atualizar transação ${transactionId}:`, error);
+          errors.push(`Transação ${transactionId}: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
+          errorCount++;
+        }
+      }
+
+      // Relatório final
+      let resultMessage = `✅ Alteração em massa concluída!\n\n`;
+      resultMessage += `✅ ${successCount} transações alteradas com sucesso\n`;
+
+      if (errorCount > 0) {
+        resultMessage += `⚠️ ${errorCount} transações com erro\n\n`;
+        resultMessage += `Erros:\n${errors.slice(0, 5).join('\n')}`;
+        if (errors.length > 5) {
+          resultMessage += `\n... e mais ${errors.length - 5} erros`;
+        }
+      }
+
+      alert(resultMessage);
+
+      // Limpar seleção apenas se houve pelo menos uma alteração bem-sucedida
+      if (successCount > 0) {
+        clearSelection();
+      }
+
+    } catch (error) {
+      console.error('Erro geral na alteração em massa:', error);
+      alert('Erro ao processar alteração em massa');
+    } finally {
+      setIsApplyingChanges(false);
+    }
   };
 
   const formatMonth = (mes: string) => {
@@ -750,6 +887,195 @@ export function OverviewTab({
 
       </div>
 
+      {/* Painel MassiveChangeSubtipo */}
+      <div className="bg-gray-800 p-4 rounded-lg shadow-lg border border-gray-700">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-3">
+            {selectedTransactions.size > 0 && (
+              <div className="flex gap-2">
+                <span className="px-2 py-1 bg-blue-600 text-white rounded text-sm">
+                  {selectedTransactions.size} selecionadas
+                </span>
+                {Object.keys(individualDescriptions).length > 0 && (
+                  <span className="px-2 py-1 bg-purple-600 text-white rounded text-sm">
+                    {Object.keys(individualDescriptions).length} com descrição própria
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+
+          {selectedTransactions.size > 0 && (
+            <div className="flex gap-2">
+              <button
+                onClick={clearSelection}
+                className="px-3 py-1 bg-gray-600 hover:bg-gray-500 text-white rounded text-sm transition-colors"
+              >
+                Limpar Tudo
+              </button>
+              {Object.keys(individualDescriptions).length > 0 && (
+                <button
+                  onClick={() => setIndividualDescriptions({})}
+                  className="px-3 py-1 bg-purple-600 hover:bg-purple-500 text-white rounded text-sm transition-colors"
+                >
+                  Limpar Descrições
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Painel de Classificação - só aparece quando há seleções */}
+        {selectedTransactions.size > 0 && (
+          <div className="bg-gray-700 p-4 rounded border border-gray-600 space-y-4">
+            <h4 className="text-gray-100 font-medium flex items-center gap-2">
+              🔧 Classificar {selectedTransactions.size} transações
+            </h4>
+
+            {/* Busca de Subtipo */}
+            <div className="space-y-2">
+              <label className="block text-sm text-gray-300">Buscar Subtipo:</label>
+              <div className="relative">
+                <Search className="absolute left-3 top-3 w-4 h-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Digite para buscar subtipo..."
+                  value={massiveChangeSubtipo}
+                  onChange={(e) => setMassiveChangeSubtipo(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 bg-gray-600 border border-gray-500 rounded text-gray-100 placeholder-gray-400 focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Dropdown de sugestões de subtipo */}
+              {massiveChangeSubtipo && massiveChangeSubtipo.length > 0 && (
+                <div className="max-h-40 overflow-y-auto bg-gray-600 border border-gray-500 rounded">
+                  {(() => {
+                    // Filtrar subtipos que contêm o texto digitado
+                    const filteredSubtipos = hierarchySubtipos.filter(s =>
+                      s.nome.toLowerCase().includes(massiveChangeSubtipo.toLowerCase())
+                    ).slice(0, 8); // Limitar a 8 resultados
+
+                    if (filteredSubtipos.length === 0) {
+                      return (
+                        <div className="p-2 text-sm text-gray-400">
+                          Nenhum subtipo encontrado
+                        </div>
+                      );
+                    }
+
+                    return filteredSubtipos.map(subtipo => {
+                      const categoria = categorias.find(c => c.id === subtipo.categoria_id);
+                      const conta = contas.find(c => c.id === categoria?.conta_id);
+
+                      return (
+                        <button
+                          key={subtipo.id}
+                          onClick={() => setMassiveChangeSubtipo(subtipo.nome)}
+                          className="w-full text-left p-2 hover:bg-gray-500 transition-colors border-b border-gray-500 last:border-b-0"
+                        >
+                          <div className="text-sm text-gray-200 font-medium">{subtipo.nome}</div>
+                          <div className="text-xs text-gray-400">
+                            {conta?.nome} → {categoria?.nome}
+                          </div>
+                        </button>
+                      );
+                    });
+                  })()}
+                </div>
+              )}
+
+              {/* Botões de Classificação Rápida (como presets) */}
+              {massiveChangeSubtipo.length === 0 && (
+                <div className="space-y-2 mt-3">
+                  <span className="text-xs text-gray-400">Classificação rápida (presets):</span>
+                  <div className="grid grid-cols-3 gap-1">
+                    {getQuickActionCategories(contas, categorias, hierarchySubtipos).map(category => (
+                      <button
+                        key={category.id}
+                        onClick={() => setMassiveChangeSubtipo(category.subtipo_nome)}
+                        className={`px-2 py-2 ${category.color} text-white rounded text-xs transition-colors hover:scale-105 flex items-center gap-1 justify-center`}
+                        title={`${category.title}: ${category.conta_codigo} > ${category.categoria_nome} > ${category.subtipo_nome}`}
+                      >
+                        <span>{category.label}</span>
+                        <span className="text-[10px]">{category.title}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Mostrar hierarquia do subtipo selecionado */}
+            {massiveChangeSubtipo && (
+              <div className="bg-gray-600 p-3 rounded border border-gray-500">
+                <h5 className="text-sm font-medium text-gray-200 mb-2">Hierarquia:</h5>
+                {(() => {
+                  // Buscar a hierarquia do subtipo selecionado
+                  const hierarchyItem = hierarchySubtipos.find(s => s.nome === massiveChangeSubtipo);
+                  if (hierarchyItem) {
+                    const categoria = categorias.find(c => c.id === hierarchyItem.categoria_id);
+                    const conta = contas.find(c => c.id === categoria?.conta_id);
+
+                    return (
+                      <div className="text-sm text-gray-300">
+                        <span className="text-blue-400">{conta?.nome || 'Conta'}</span>
+                        <span className="mx-2">→</span>
+                        <span className="text-green-400">{categoria?.nome || 'Categoria'}</span>
+                        <span className="mx-2">→</span>
+                        <span className="text-yellow-400 font-medium">{massiveChangeSubtipo}</span>
+                      </div>
+                    );
+                  } else {
+                    return (
+                      <div className="text-sm text-gray-400">
+                        Subtipo "{massiveChangeSubtipo}" não encontrado na hierarquia
+                      </div>
+                    );
+                  }
+                })()}
+              </div>
+            )}
+
+            {/* Campo de Descrição */}
+            <div className="space-y-2">
+              <label className="block text-sm text-gray-300">Descrição do lote (opcional):</label>
+              <input
+                type="text"
+                placeholder="Aplicada a todas, exceto quem tiver descrição individual"
+                value={massiveChangeDescricao}
+                onChange={(e) => setMassiveChangeDescricao(e.target.value)}
+                className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded text-gray-100 placeholder-gray-400 focus:border-blue-500 focus:outline-none"
+              />
+              <div className="text-xs text-gray-400">
+                💡 Hierarquia: Individual → Lote → Original
+              </div>
+            </div>
+
+            {/* Botão Aplicar */}
+            <div className="flex justify-end">
+              <button
+                onClick={applyMassiveChange}
+                disabled={!massiveChangeSubtipo || isApplyingChanges}
+                className={`px-4 py-2 rounded font-medium transition-colors ${
+                  massiveChangeSubtipo && !isApplyingChanges
+                    ? 'bg-green-600 hover:bg-green-500 text-white'
+                    : 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                }`}
+              >
+                {isApplyingChanges ? (
+                  <span className="flex items-center gap-2">
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    Aplicando...
+                  </span>
+                ) : (
+                  'Aplicar Alterações'
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Resto do conteúdo permanece igual... */}
       {classifiedTransactions.length === 0 ? (
         <div className="bg-gray-800 p-12 rounded-lg border border-gray-700 text-center">
@@ -1047,16 +1373,55 @@ export function OverviewTab({
                                                 }`}>
                                                   {transaction.valor >= 0 ? '+' : '-'}R$ {formatCurrency(Math.abs(transaction.valor))}
                                                 </span>
-                                                {transaction.realizado !== 'r' && (
-                                                  <button
-                                                    onClick={() => onEditTransaction(transaction)}
-                                                    className="block mt-0.5 px-2 py-0.5 bg-purple-600 hover:bg-purple-500 text-white rounded text-xs transition-colors"
-                                                  >
-                                                    Editar
-                                                  </button>
-                                                )}
+                                                <div className="flex items-center gap-1 mt-0.5">
+                                                  {/* Checkbox para seleção em massa */}
+                                                  {transaction.realizado !== 'r' && (
+                                                    <button
+                                                      onClick={() => toggleTransactionSelection(transaction.id)}
+                                                      className={`w-6 h-6 rounded border-2 transition-colors flex items-center justify-center ${
+                                                        selectedTransactions.has(transaction.id)
+                                                          ? 'bg-blue-600 border-blue-600 text-white'
+                                                          : 'border-gray-400 hover:border-blue-400'
+                                                      }`}
+                                                      title="Selecionar para alteração em massa"
+                                                    >
+                                                      {selectedTransactions.has(transaction.id) && (
+                                                        <CheckSquare className="w-3 h-3" />
+                                                      )}
+                                                    </button>
+                                                  )}
+
+                                                  {/* Botão Editar */}
+                                                  {transaction.realizado !== 'r' && (
+                                                    <button
+                                                      onClick={() => onEditTransaction(transaction)}
+                                                      className="w-7 h-7 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded text-xs transition-colors flex items-center justify-center shadow-sm"
+                                                      title="Editar/Classificar"
+                                                    >
+                                                      ✏️
+                                                    </button>
+                                                  )}
+                                                </div>
                                               </div>
                                             </div>
+
+                                            {/* Campo de descrição individual - aparece quando transação está selecionada */}
+                                            {selectedTransactions.has(transaction.id) && (
+                                              <div className="px-6 py-3 bg-pink-900/20 border-t border-pink-700">
+                                                <div className="space-y-2">
+                                                  <label className="block text-xs text-pink-200 font-medium">
+                                                    Descrição individual (opcional):
+                                                  </label>
+                                                  <input
+                                                    type="text"
+                                                    placeholder="Deixe vazio para usar descrição do lote ou original"
+                                                    value={individualDescriptions[transaction.id] || ''}
+                                                    onChange={(e) => updateIndividualDescription(transaction.id, e.target.value)}
+                                                    className="w-full px-3 py-2 bg-pink-800 border border-pink-600 rounded text-pink-100 placeholder-pink-300 focus:border-pink-400 focus:outline-none text-sm"
+                                                  />
+                                                </div>
+                                              </div>
+                                            )}
                                           </div>
                                         ))}
                                       </div>

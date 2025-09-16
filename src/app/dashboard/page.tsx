@@ -769,15 +769,15 @@ export default function DashboardPage() {
             {activeTab === 'inbox' && (
               <InboxTab
                 unclassifiedTransactions={transactions
-                  .filter(t => 
-                    t.realizado === 'p' && 
+                  .filter(t =>
+                    t.realizado === 'p' &&
                     t.subtipo_id !== COMPLEX_SUBTIPO_ID
                   )
                   .sort((a, b) => new Date(b.data).getTime() - new Date(a.data).getTime())
                 }
                 unclassifiedCards={cardTransactions
-                  .filter(c => 
-                    c.status === 'pending' && 
+                  .filter(c =>
+                    c.status === 'pending' &&
                     c.subtipo_id !== COMPLEX_SUBTIPO_ID
                   )
                   .sort((a, b) => new Date(b.data_transacao).getTime() - new Date(a.data_transacao).getTime())
@@ -796,6 +796,8 @@ export default function DashboardPage() {
                 }}
                 onApplyBatchClassification={handleBatchClassification}
                 onMoveToComplexClassification={handleMoveToComplexClassification}
+                onUpdateTransaction={async (transaction) => { await updateTransaction(transaction); }}
+                onUpdateCardTransaction={async (cardTransaction) => { await updateCardTransaction(cardTransaction); }}
                 canReconcile={canReconcile()}
               />
             )}
@@ -825,9 +827,10 @@ export default function DashboardPage() {
 )}
 
             {activeTab === 'overview' && (
-              <OverviewTab 
+              <OverviewTab
                 transactions={transactions.filter(t => t.realizado === 's')}
                 onEditTransaction={handleEditTransaction}
+                onUpdateTransaction={async (transaction) => { await updateTransaction(transaction); }}
               />
             )}
 

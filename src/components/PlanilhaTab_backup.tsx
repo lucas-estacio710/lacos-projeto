@@ -58,105 +58,29 @@ export function PlanilhaTab({ transactions }: PlanilhaTabProps) {
     });
   };
 
-  // Gerar meses baseado nos dados reais das transações (campo mes)
-  const getAvailableMonths = () => {
-    // Coletar todos os meses únicos das transações
-    const uniqueMonths = new Set<string>();
-    transactions.forEach(t => {
-      if (t.mes) {
-        console.log('Transaction mes:', t.mes); // Debug - ver formato real
-        uniqueMonths.add(t.mes);
-      }
-    });
-
-    console.log('All unique months:', Array.from(uniqueMonths)); // Debug
-
-    // Converter para array e ordenar (mais antigo primeiro)
-    const monthsArray = Array.from(uniqueMonths).sort();
-    console.log('Sorted months array:', monthsArray); // Debug
-
-    // Se não houver transações, usar últimos 12 meses como fallback
-    if (monthsArray.length === 0) {
-      const months = [];
-      const now = new Date();
-
-      for (let i = 11; i >= 0; i--) {
-        const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
-        const year = date.getFullYear();
-        const month = (date.getMonth() + 1).toString().padStart(2, '0');
-        const shortYear = year.toString().slice(-2);
-
-        months.push({
-          key: `${year}-${month}`,
-          display: `${shortYear}${month}`,
-          year,
-          month: parseInt(month)
-        });
-      }
-      return months;
-    }
-
-    // Pegar os últimos 12 meses disponíveis (ou todos se forem menos de 12)
-    const lastMonths = monthsArray.slice(-12);
-
-    return lastMonths.map(monthStr => {
-      console.log('Processing month:', monthStr); // Debug
-
-      let year, month;
-
-      // Detectar formato do campo mes
-      if (monthStr.includes('-')) {
-        // Formato: YYYY-MM
-        [year, month] = monthStr.split('-');
-      } else if (monthStr.length === 4 && !isNaN(parseInt(monthStr))) {
-        // Formato: YYMM (ex: 2509 = setembro/2025)
-        const yyStr = monthStr.substring(0, 2);
-        const mmStr = monthStr.substring(2, 4);
-
-        // Converter YY para YYYY (assumir 20XX)
-        year = '20' + yyStr;
-        month = mmStr;
-      } else if (monthStr.length === 2 && !isNaN(parseInt(monthStr))) {
-        // Formato: MM (só mês, assumir ano atual)
-        const currentYear = new Date().getFullYear().toString();
-        year = currentYear;
-        month = monthStr.padStart(2, '0');
-      } else {
-        console.warn('Unknown month format:', monthStr);
-        return {
-          key: monthStr,
-          display: 'ERR',
-          year: 0,
-          month: 0
-        };
-      }
-
-      console.log('Parsed - year:', year, 'month:', month); // Debug
-
-      if (!year || !month) {
-        console.warn('Invalid parsed values for:', monthStr);
-        return {
-          key: monthStr,
-          display: 'ERR',
-          year: 0,
-          month: 0
-        };
-      }
-
-      const shortYear = year.slice(-2);
-      const display = `${shortYear}${month}`;
-      console.log('Final display:', display); // Debug
-
-      return {
-        key: monthStr, // Manter formato original YYMM para comparação
-        display, // YYMM format (ex: 2509)
-        year: parseInt(year),
+  // Gerar últimos 12 meses
+  const getLast12Months = () => {
+    const months = [];
+    const now = new Date();
+    
+    for (let i = 11; i >= 0; i--) {
+      const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const year = date.getFullYear();
+      const month = (date.getMonth() + 1).toString().padStart(2, '0');
+      const shortYear = year.toString().slice(-2);
+      
+      months.push({
+        key: `${year}-${month}`,
+        display: `${shortYear}${month}`,
+        year,
         month: parseInt(month)
-      };
-    });
+      });
+    }
+    
+    return months;
   };
 
-  const last12Months = getAvailableMonths();
+  const last12Months = getLast12Months();
   
   // Paginação dos meses (4 por vez)
   const MONTHS_PER_PAGE = 4;
@@ -209,8 +133,9 @@ export function PlanilhaTab({ transactions }: PlanilhaTabProps) {
       
       const monthlyValues = currentMonths.map(month => {
         const monthTransactions = subtipoTransactions.filter(t => {
-          // Usar o campo mes (competência) ao invés de data (real)
-          return t.mes === month.key; // Ambos no formato 'YYYY-MM'
+          const transactionDate = new Date(t.data);
+          return transactionDate.getFullYear() === month.year && 
+                 (transactionDate.getMonth() + 1) === month.month;
         });
         
         return monthTransactions.reduce((sum, t) => sum + t.valor, 0);
@@ -275,8 +200,9 @@ export function PlanilhaTab({ transactions }: PlanilhaTabProps) {
           const subtipoMonthlyValues = currentMonths.map(month => {
             return subtipoTransactions
               .filter(t => {
-                // Usar o campo mes (competência) ao invés de data (real)
-                return t.mes === month.key; // Ambos no formato 'YYYY-MM'
+                const transactionDate = new Date(t.data);
+                return transactionDate.getFullYear() === month.year && 
+                       (transactionDate.getMonth() + 1) === month.month;
               })
               .reduce((sum, t) => sum + t.valor, 0);
           });
@@ -426,7 +352,7 @@ export function PlanilhaTab({ transactions }: PlanilhaTabProps) {
         <div className="bg-gray-800 rounded-lg p-4">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-semibold text-gray-100">
-              📈 DRE - Demonstracao Completa por Hierarquia
+              📈 DRE - Demonstração Completa por Hierarquia
             </h3>
             
             {/* Controles de navegação */}
@@ -465,11 +391,11 @@ export function PlanilhaTab({ transactions }: PlanilhaTabProps) {
             <table className="w-full text-xs">
               <thead>
                 <tr className="bg-gray-700">
-                  <th className="text-left p-2 text-gray-100 font-semibold min-w-[100px] max-w-[100px]">
+                  <th className="text-left p-1 text-gray-100 font-semibold min-w-[100px] max-w-[100px]">
                     <div className="truncate text-xs">Hierarquia</div>
                   </th>
                   {currentMonths.map(month => (
-                    <th key={month.key} className="text-right p-2 text-gray-100 font-semibold min-w-[45px]">
+                    <th key={month.key} className="text-right p-1 text-gray-100 font-semibold min-w-[45px]">
                       <div className="truncate text-xs">{month.display}</div>
                     </th>
                   ))}
@@ -479,23 +405,25 @@ export function PlanilhaTab({ transactions }: PlanilhaTabProps) {
                 {dreData.map((contaData, contaIndex) => (
                   <React.Fragment key={contaData.conta.codigo}>
                     {/* Linha da Conta */}
-                    <tr className="bg-blue-900/30 hover:bg-blue-800/40 transition-colors cursor-pointer"
-                        onClick={() => toggleConta(contaData.conta.codigo)}>
-                      <td className="p-2 text-white font-bold text-xs min-w-[100px] max-w-[100px] border-r border-gray-600">
+                    <tr className="bg-blue-900/30 hover:bg-blue-800/40 transition-colors">
+                      <td className="p-1.5 text-white font-bold text-xs min-w-[100px] max-w-[100px] border-r border-gray-600">
                         <div className="flex items-center gap-1">
-                          <div className="flex items-center justify-center w-4 h-4">
-                            {expandedContas.has(contaData.conta.codigo) ?
-                              <ChevronDown className="w-3 h-3" /> :
+                          <button
+                            onClick={() => toggleConta(contaData.conta.codigo)}
+                            className="hover:bg-blue-700 rounded p-0.5"
+                          >
+                            {expandedContas.has(contaData.conta.codigo) ? 
+                              <ChevronDown className="w-3 h-3" /> : 
                               <ChevronRightExpand className="w-3 h-3" />
                             }
-                          </div>
+                          </button>
                           <span className="truncate" title={`${contaData.conta.codigo} - ${contaData.conta.nome}`}>
                             {contaData.conta.codigo} - {contaData.conta.nome}
                           </span>
                         </div>
                       </td>
                       {contaData.conta.monthlyValues.map((value, monthIndex) => (
-                        <td key={monthIndex} className="text-right p-2">
+                        <td key={monthIndex} className="text-right p-1">
                           <span className={`${value === 0 ? 'text-gray-500' : value > 0 ? 'text-green-400' : 'text-red-400'} font-mono text-xs`}>
                             {value === 0 ? '-' : `${value > 0 ? '+' : ''}${formatCurrency(Math.abs(value))}`}
                           </span>
@@ -507,26 +435,25 @@ export function PlanilhaTab({ transactions }: PlanilhaTabProps) {
                     {expandedContas.has(contaData.conta.codigo) && contaData.categorias.map((categoriaData, catIndex) => (
                       <React.Fragment key={`${contaData.conta.codigo}-${categoriaData.categoria.nome}`}>
                         {/* Linha da Categoria */}
-                        <tr className="bg-green-900/20 hover:bg-green-800/30 transition-colors cursor-pointer"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              toggleCategoria(contaData.conta.codigo, categoriaData.categoria.nome);
-                            }}>
-                          <td className="p-2 text-green-100 font-semibold text-xs min-w-[100px] max-w-[100px] border-r border-gray-600 pl-3">
+                        <tr className="bg-green-900/20 hover:bg-green-800/30 transition-colors">
+                          <td className="p-1 text-green-100 font-semibold text-xs min-w-[100px] max-w-[100px] border-r border-gray-600 pl-2">
                             <div className="flex items-center gap-1">
-                              <div className="flex items-center justify-center w-4 h-4">
-                                {expandedCategorias.has(`${contaData.conta.codigo}-${categoriaData.categoria.nome}`) ?
-                                  <ChevronDown className="w-3 h-3" /> :
+                              <button
+                                onClick={() => toggleCategoria(contaData.conta.codigo, categoriaData.categoria.nome)}
+                                className="hover:bg-green-700 rounded p-0.5"
+                              >
+                                {expandedCategorias.has(`${contaData.conta.codigo}-${categoriaData.categoria.nome}`) ? 
+                                  <ChevronDown className="w-3 h-3" /> : 
                                   <ChevronRightExpand className="w-3 h-3" />
                                 }
-                              </div>
+                              </button>
                               <span className="truncate" title={categoriaData.categoria.nome}>
                                 {categoriaData.categoria.nome}
                               </span>
                             </div>
                           </td>
                           {categoriaData.categoria.monthlyValues.map((value, monthIndex) => (
-                            <td key={monthIndex} className="text-right p-2">
+                            <td key={monthIndex} className="text-right p-1">
                               <span className={`${value === 0 ? 'text-gray-500' : value > 0 ? 'text-green-400' : 'text-red-400'} font-mono text-xs`}>
                                 {value === 0 ? '-' : `${value > 0 ? '+' : ''}${formatCurrency(Math.abs(value))}`}
                               </span>
@@ -537,15 +464,15 @@ export function PlanilhaTab({ transactions }: PlanilhaTabProps) {
                         {/* Subtipos da Categoria (se expandida) */}
                         {expandedCategorias.has(`${contaData.conta.codigo}-${categoriaData.categoria.nome}`) && 
                          categoriaData.subtipos.map((subtipoData, subIndex) => (
-                          <tr key={`${contaData.conta.codigo}-${categoriaData.categoria.nome}-${subtipoData.nome}`}
+                          <tr key={`${contaData.conta.codigo}-${categoriaData.categoria.nome}-${subtipoData.nome}`} 
                               className="bg-gray-800 hover:bg-gray-700 transition-colors">
-                            <td className="p-2 text-gray-200 text-xs min-w-[100px] max-w-[100px] border-r border-gray-600 pl-5">
+                            <td className="p-1 text-gray-200 text-xs min-w-[100px] max-w-[100px] border-r border-gray-600 pl-4">
                               <span className="truncate" title={subtipoData.nome}>
                                 {subtipoData.nome.length > 8 ? subtipoData.nome.substring(0, 7) + '...' : subtipoData.nome}
                               </span>
                             </td>
                             {subtipoData.monthlyValues.map((value, monthIndex) => (
-                              <td key={monthIndex} className="text-right p-2">
+                              <td key={monthIndex} className="text-right p-1">
                                 <span className={`${value === 0 ? 'text-gray-500' : value > 0 ? 'text-green-400' : 'text-red-400'} font-mono text-xs`}>
                                   {value === 0 ? '-' : `${value > 0 ? '+' : ''}${formatCurrency(Math.abs(value))}`}
                                 </span>
@@ -576,15 +503,15 @@ export function PlanilhaTab({ transactions }: PlanilhaTabProps) {
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="bg-gray-700 sticky top-0 z-10">
-                      <th className="text-left p-2 text-gray-100 font-semibold sticky left-0 bg-gray-700 z-20 min-w-[120px] max-w-[120px]">
+                      <th className="text-left p-1.5 text-gray-100 font-semibold sticky left-0 bg-gray-700 z-20 min-w-[120px] max-w-[120px]">
                         <div className="truncate" title="Subtipo">Sub</div>
                       </th>
                       {currentMonths.map(month => (
-                        <th key={month.key} className="text-right p-2 text-gray-100 font-semibold min-w-[70px]">
+                        <th key={month.key} className="text-right p-1.5 text-gray-100 font-semibold min-w-[70px]">
                           <div className="truncate">{month.display}</div>
                         </th>
                       ))}
-                      <th className="text-center p-2 text-gray-100 font-semibold bg-gray-600 min-w-[80px]">
+                      <th className="text-center p-1.5 text-gray-100 font-semibold bg-gray-600 min-w-[80px]">
                         Total
                       </th>
                     </tr>
@@ -592,19 +519,19 @@ export function PlanilhaTab({ transactions }: PlanilhaTabProps) {
                   <tbody>
                     {planilhaData.map((row, index) => (
                       <tr key={row.subtipo} className={`${index % 2 === 0 ? 'bg-gray-750' : 'bg-gray-800'} hover:bg-gray-600 transition-colors`}>
-                        <td className="p-2 text-gray-100 font-medium sticky left-0 bg-inherit z-10 border-r border-gray-600 min-w-[120px] max-w-[120px]">
+                        <td className="p-1.5 text-gray-100 font-medium sticky left-0 bg-inherit z-10 border-r border-gray-600 min-w-[120px] max-w-[120px]">
                           <div className="truncate text-xs" title={row.subtipo}>
                             {row.subtipo.length > 15 ? row.subtipo.substring(0, 12) + '...' : row.subtipo}
                           </div>
                         </td>
                         {row.monthlyValues.map((value, monthIndex) => (
-                          <td key={monthIndex} className="text-right p-2">
+                          <td key={monthIndex} className="text-right p-1.5">
                             <span className={`${value === 0 ? 'text-gray-500' : value > 0 ? 'text-green-400' : 'text-red-400'} font-mono text-xs`}>
                               {value === 0 ? '-' : `${value > 0 ? '+' : ''}${formatCurrency(Math.abs(value))}`}
                             </span>
                           </td>
                         ))}
-                        <td className="text-center p-2 bg-gray-700 font-bold">
+                        <td className="text-center p-1.5 bg-gray-700 font-bold">
                           <span className={`${row.total > 0 ? 'text-green-400' : 'text-red-400'} font-mono text-xs`}>
                             {row.total > 0 ? '+' : ''}{formatCurrency(Math.abs(row.total))}
                           </span>
@@ -614,17 +541,17 @@ export function PlanilhaTab({ transactions }: PlanilhaTabProps) {
                   </tbody>
                   <tfoot>
                     <tr className="bg-gray-600 font-bold sticky bottom-0">
-                      <td className="p-2 text-gray-100 sticky left-0 bg-gray-600 z-10 min-w-[120px] max-w-[120px]">
+                      <td className="p-1.5 text-gray-100 sticky left-0 bg-gray-600 z-10 min-w-[120px] max-w-[120px]">
                         <div className="truncate text-xs font-bold">TOTAL</div>
                       </td>
                       {monthlyTotals.map((total, monthIndex) => (
-                        <td key={monthIndex} className="text-right p-2">
+                        <td key={monthIndex} className="text-right p-1.5">
                           <span className={`${total === 0 ? 'text-gray-300' : total > 0 ? 'text-green-300' : 'text-red-300'} font-mono font-bold text-xs`}>
                             {total === 0 ? '-' : `${total > 0 ? '+' : ''}${formatCurrency(Math.abs(total))}`}
                           </span>
                         </td>
                       ))}
-                      <td className="text-center p-2 bg-gray-500">
+                      <td className="text-center p-1.5 bg-gray-500">
                         <span className={`${grandTotal > 0 ? 'text-green-200' : 'text-red-200'} font-mono font-bold text-sm`}>
                           {grandTotal > 0 ? '+' : ''}{formatCurrency(Math.abs(grandTotal))}
                         </span>

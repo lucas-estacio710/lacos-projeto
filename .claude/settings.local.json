@@ -37,7 +37,8 @@
       "MultiEdit(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\**)",
       "Read(/C:\\Users\\kel_v\\lacos-projeto\\lacos-app\\src\\app/**)",
       "Bash(npx create-next-app:*)",
-      "Read(/C:\\Users\\kel_v\\rip-pet-html/**)"
+      "Read(/C:\\Users\\kel_v\\rip-pet-html/**)",
+      "Bash(gh repo view:*)"
     ],
     "deny": [],
     "ask": [],

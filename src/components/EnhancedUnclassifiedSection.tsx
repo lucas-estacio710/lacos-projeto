@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
+import { CheckSquare } from 'lucide-react';
 import { Transaction } from '@/types';
 import { CardTransaction } from '@/hooks/useCardTransactions';
 import { BatchClassificationModal } from '@/components/BatchClassificationModal';
-import { 
+import {
   getQuickActionCategories
 } from '@/lib/smartClassification';
 import { formatCurrency, formatDate } from '@/lib/utils';
@@ -28,6 +29,12 @@ interface EnhancedUnclassifiedSectionProps {
     subtipo: string;
     customDescriptions?: Record<string, string>; // Adicionar suporte para descrições customizadas
   }) => Promise<void>;
+  // Props para MassiveChangeSubtipo
+  massiveChangeMode?: boolean;
+  selectedItems?: Set<string>;
+  onToggleItemSelection?: (itemId: string) => void;
+  individualDescriptions?: Record<string, string>;
+  onUpdateIndividualDescription?: (itemId: string, description: string) => void;
 }
 
 export function EnhancedUnclassifiedSection({
@@ -41,7 +48,12 @@ export function EnhancedUnclassifiedSection({
   onEditCardTransaction,
   onReconcileTransaction,
   canReconcile = false,
-  onApplyBatchClassification
+  onApplyBatchClassification,
+  massiveChangeMode = false,
+  selectedItems = new Set(),
+  onToggleItemSelection,
+  individualDescriptions = {},
+  onUpdateIndividualDescription
 }: EnhancedUnclassifiedSectionProps) {
   const { contas, categorias, subtipos } = useHierarchy();
   const { customAccounts } = useConfig();
@@ -237,6 +249,24 @@ export function EnhancedUnclassifiedSection({
                           
                           {/* Botões de Ação na mesma linha */}
                           <div className="flex items-center gap-1 flex-shrink-0">
+                            {/* Checkbox para MassiveChangeSubtipo */}
+                            {onToggleItemSelection && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onToggleItemSelection(item.id);
+                                }}
+                                className={`w-7 h-7 rounded transition-colors flex items-center justify-center shadow-sm ${
+                                  selectedItems.has(item.id)
+                                    ? 'bg-blue-600 hover:bg-blue-500 text-white'
+                                    : 'bg-gray-600 hover:bg-gray-500 text-gray-300'
+                                }`}
+                                title={selectedItems.has(item.id) ? "Desmarcar item" : "Marcar item"}
+                              >
+                                <CheckSquare size={14} />
+                              </button>
+                            )}
+
                             {/* Botão de Classificação Complexa */}
                             {onMoveToComplexClassification && (
                               <button
@@ -247,7 +277,7 @@ export function EnhancedUnclassifiedSection({
                                 🧩
                               </button>
                             )}
-                            
+
                             {/* Botão de Edição */}
                             <button
                               onClick={() => {
@@ -284,6 +314,20 @@ export function EnhancedUnclassifiedSection({
                             className="w-full px-2 py-1 bg-gray-600 border border-gray-500 rounded text-gray-100 text-sm placeholder-gray-400 focus:border-blue-500 focus:outline-none"
                           />
                         </div>
+
+                        {/* Descrição Individual para MassiveChangeSubtipo */}
+                        {selectedItems.has(item.id) && onUpdateIndividualDescription && (
+                          <div>
+                            <label className="text-pink-400 text-xs block mb-1">Descrição Individual:</label>
+                            <input
+                              type="text"
+                              value={individualDescriptions[item.id] || ''}
+                              onChange={(e) => onUpdateIndividualDescription(item.id, e.target.value)}
+                              placeholder={item.descricao_origem || 'Digite uma descrição individual...'}
+                              className="w-full px-2 py-1 bg-pink-50 border border-pink-300 rounded text-pink-900 text-sm placeholder-pink-400 focus:border-pink-500 focus:outline-none"
+                            />
+                          </div>
+                        )}
                       </div>
 
                       {/* Botões de Ação Rápida com Descrição Editada - Grid 2x3 */}
@@ -292,7 +336,7 @@ export function EnhancedUnclassifiedSection({
                           <button
                             key={category.id}
                             onClick={() => handleQuickClassificationWithDescription(item as Transaction | CardTransaction, category.id)}
-                            className={`px-2 py-1 ${category.color} text-white rounded text-xs transition-colors hover:scale-105 flex items-center gap-1 justify-center`}
+                            className={`px-2 py-2 ${category.color} text-white rounded text-xs transition-colors hover:scale-105 flex items-center gap-1 justify-center`}
                             title={`${category.title}: ${category.conta_codigo} > ${category.categoria_nome} > ${category.subtipo_nome}`}
                           >
                             <span>{category.label}</span>

@@ -209,12 +209,12 @@ export function ManualEntryModal({ isOpen, onClose, onSuccess }: ManualEntryModa
 
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
-    
+
     if (!form.data) newErrors.data = 'Data é obrigatória';
     if (form.valor === 0) newErrors.valor = 'Valor deve ser diferente de zero';
     if (!form.descricao.trim()) newErrors.descricao = 'Descrição é obrigatória';
-    if (!form.subtipo_id) newErrors.subtipo_id = 'Classificação é obrigatória';
-    
+    // Classificação agora é opcional - pode ficar vazia para ir para InboxTab
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -225,13 +225,16 @@ export function ManualEntryModal({ isOpen, onClose, onSuccess }: ManualEntryModa
     if (!validateForm()) return;
     
     const selectedHierarchy = availableHierarchy.find(h => h.subtipo_id === form.subtipo_id);
-    const confirmText = 
+    const isUnclassified = !form.subtipo_id;
+
+    const confirmText =
       `📝 Criar lançamento manual?\n\n` +
       `📅 Data: ${new Date(form.data).toLocaleDateString('pt-BR')}\n` +
       `💰 Valor: ${form.valor >= 0 ? '+' : ''}R$ ${Math.abs(form.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n` +
-      `🏷️ Classificação: ${selectedHierarchy?.caminho_completo}\n` +
+      `🏷️ Classificação: ${isUnclassified ? '❌ SEM CLASSIFICAÇÃO (irá para InboxTab)' : selectedHierarchy?.caminho_completo}\n` +
       `📄 Descrição: ${form.descricao}\n` +
-      `🏦 Origem/CC: ${form.origem} / ${form.cc}`;
+      `🏦 Origem/CC: ${form.origem} / ${form.cc}` +
+      (isUnclassified ? '\n\n⚠️ Este lançamento aparecerá na InboxTab para classificação posterior.' : '');
 
     if (!window.confirm(confirmText)) return;
 
@@ -247,7 +250,11 @@ export function ManualEntryModal({ isOpen, onClose, onSuccess }: ManualEntryModa
         subtipo_id: form.subtipo_id
       });
       
-      alert('✅ Lançamento manual criado com sucesso!');
+      const successMessage = isUnclassified
+        ? '✅ Lançamento manual criado com sucesso!\n📥 O lançamento está na InboxTab aguardando classificação.'
+        : '✅ Lançamento manual criado e classificado com sucesso!';
+
+      alert(successMessage);
       onSuccess?.();
       onClose();
       
@@ -329,8 +336,31 @@ export function ManualEntryModal({ isOpen, onClose, onSuccess }: ManualEntryModa
 
             {/* ✅ NOVO: Sistema de Cascata com Toggles */}
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">Classificação Hierárquica *</label>
-              
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Classificação Hierárquica (opcional)
+                <span className="text-xs text-gray-400 block mt-1">
+                  💡 Deixe em branco para criar lançamento não classificado que irá para a InboxTab
+                </span>
+              </label>
+
+              {/* Botão para limpar classificação */}
+              {(form.selected_conta || form.selected_categoria || form.subtipo_id) && (
+                <div className="mb-3">
+                  <button
+                    type="button"
+                    onClick={() => setForm(prev => ({
+                      ...prev,
+                      selected_conta: '',
+                      selected_categoria: '',
+                      subtipo_id: ''
+                    }))}
+                    className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-xs transition-colors"
+                  >
+                    🗑️ Limpar Classificação (deixar sem classificar)
+                  </button>
+                </div>
+              )}
+
               {/* Passo 1: Selecionar Conta */}
               <div className="mb-3">
                 <div className="text-xs text-gray-400 mb-1">1. Selecione a Conta:</div>
@@ -399,10 +429,15 @@ export function ManualEntryModal({ isOpen, onClose, onSuccess }: ManualEntryModa
               )}
 
               {/* Preview da seleção completa */}
-              {form.subtipo_id && (
+              {form.subtipo_id ? (
                 <div className="mt-2 p-3 bg-green-900/30 border border-green-600 rounded text-sm text-green-200">
                   ✅ <strong>Selecionado:</strong><br />
                   {availableHierarchy.find(item => item.subtipo_id === form.subtipo_id)?.caminho_completo}
+                </div>
+              ) : (
+                <div className="mt-2 p-3 bg-yellow-900/30 border border-yellow-600 rounded text-sm text-yellow-200">
+                  ⚠️ <strong>Sem Classificação:</strong><br />
+                  Este lançamento será criado sem classificação e aparecerá na <strong>InboxTab</strong> para ser classificado posteriormente.
                 </div>
               )}
 

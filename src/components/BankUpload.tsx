@@ -39,6 +39,7 @@ export function BankUpload({
     
     // Para cartões, usar formato: data,descricao,valor
     const isCardTransaction = selectedBank === 'Nubank' || selectedBank === 'VISA' || selectedBank === 'MasterCard';
+    const isInterTransaction = selectedBank === 'Inter';
     
     if (isCardTransaction) {
       for (let i = 1; i < lines.length; i++) { // Skip header
@@ -71,6 +72,32 @@ export function BankUpload({
             }
             
             total += valorFinal; // Soma com sinais corretos
+            validCount++;
+          }
+        }
+      }
+    } else if (selectedBank === 'Inter') {
+      // Para Inter (formato: Data Lançamento;Histórico;Descrição;Valor;Saldo)
+      for (let i = 1; i < lines.length; i++) { // Skip header
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        const cols = line.split(';');
+        if (cols.length >= 4) {
+          const dataLancamento = cols[0].trim();
+          const historico = cols[1].trim();
+          const descricao = cols[2].trim();
+          const valorStr = cols[3].trim();
+
+          // Validações básicas
+          if (!dataLancamento || !historico || !descricao || !valorStr) {
+            continue;
+          }
+
+          // Converter valor (formato brasileiro: 1.234,56 ou negativo -1.234,56)
+          const valor = parseValorBR(valorStr);
+          if (!isNaN(valor) && valor !== 0) {
+            total += valor;
             validCount++;
           }
         }
@@ -333,6 +360,80 @@ export function BankUpload({
     return cardTransactions;
   };
 
+  // ✅ FUNÇÃO: Processar extrato do Inter
+  const processInterTransactions = async (lines: string[]): Promise<Transaction[]> => {
+    const transactions: Transaction[] = [];
+    let processedLines = 0;
+
+    for (let i = 1; i < lines.length; i++) { // Skip header
+      const line = lines[i].trim();
+      if (!line) continue;
+
+      const cols = line.split(';');
+      if (cols.length >= 4) {
+        const dataLancamento = cols[0].trim();
+        const historico = cols[1].trim();
+        const descricao = cols[2].trim();
+        const valorStr = cols[3].trim();
+
+        // Validações básicas
+        if (!dataLancamento || !historico || !descricao || !valorStr) {
+          continue;
+        }
+
+        // Converter data de DD/MM/AAAA para AAAA-MM-DD
+        const [dia, mes, ano] = dataLancamento.split('/');
+        if (!dia || !mes || !ano) continue;
+
+        const dataFormatted = `${ano}-${mes.padStart(2, '0')}-${dia.padStart(2, '0')}`;
+
+        // Converter valor (formato brasileiro)
+        const valor = parseValorBR(valorStr);
+        if (isNaN(valor) || valor === 0) continue;
+
+        // Gerar ID único
+        const transactionId = `INTER_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+        // Gerar mês no formato AAMM
+        const anoShort = ano.slice(-2);
+        const mesFormatted = `${anoShort}${mes.padStart(2, '0')}`;
+
+        // Criar transação
+        const transaction: Transaction = {
+          id: transactionId,
+          mes: mesFormatted,
+          data: dataFormatted,
+          descricao_origem: `${historico} - ${descricao}`,
+          descricao: `${historico} - ${descricao}`,
+          valor: valor,
+          origem: 'Inter',
+          cc: 'Inter',
+          realizado: 'p' as const, // Pendente para classificação
+          subtipo_id: null,
+          linked_future_group: undefined,
+          is_from_reconciliation: false,
+          future_subscription_id: undefined,
+          reconciliation_metadata: JSON.stringify({
+            imported_from: 'inter_paste',
+            original_data: {
+              data_lancamento: dataLancamento,
+              historico: historico,
+              descricao: descricao,
+              valor_original: valorStr
+            },
+            imported_at: new Date().toISOString()
+          })
+        };
+
+        transactions.push(transaction);
+        processedLines++;
+      }
+    }
+
+    console.log(`📊 Inter: ${transactions.length} transações processadas`);
+    return transactions;
+  };
+
   // ✅ FUNÇÃO: Processar texto do Santander
   const processSantanderText = async (lines: string[]): Promise<Transaction[]> => {
     const transactions: Transaction[] = [];
@@ -519,8 +620,38 @@ export function BankUpload({
         alert(message);
         setPastedData(''); // Limpar dados após processar
         onClose();
+      } else if (selectedBank === 'Inter') {
+        // ===== PROCESSAR INTER =====
+        const importedTransactions = await processInterTransactions(lines);
+
+        if (importedTransactions.length === 0) {
+          alert('⚠️ Nenhuma transação válida encontrada nos dados colados do Inter');
+          return;
+        }
+
+        console.log(`🎯 Enviando ${importedTransactions.length} transações do Inter para o sistema`);
+
+        // Enviar para o hook de transações
+        const result = await onTransactionsImported(importedTransactions);
+
+        let message = `✅ Importação do Inter concluída!\n\n`;
+        message += `📊 ${importedTransactions.length} transações processadas\n`;
+        message += `📍 Todas as transações foram marcadas como pendentes\n`;
+        message += `📥 Vá para a InboxTab para classificá-las\n`;
+
+        if (result && typeof result === 'object' && 'stats' in result) {
+          const stats = result.stats!;
+          message += `\n📈 Estatísticas:\n`;
+          message += `• Total processadas: ${stats.total}\n`;
+          message += `• Novas adicionadas: ${stats.added}\n`;
+          message += `• Duplicatas ignoradas: ${stats.duplicates}`;
+        }
+
+        alert(message);
+        setPastedData(''); // Limpar dados após processar
+        onClose();
       } else {
-        alert('⚠️ Entrada manual disponível apenas para cartões de crédito (Nubank, VISA, MasterCard) e Santander');
+        alert('⚠️ Entrada manual disponível apenas para cartões de crédito (Nubank, VISA, MasterCard), Santander e Inter');
       }
     } catch (error) {
       console.error('❌ Erro ao processar dados colados:', error);
@@ -946,11 +1077,11 @@ export function BankUpload({
                 <option value="TON">🟢 Ton (Extrato)</option>
                 <option value="Nubank">🟣 Nubank (Fatura Cartão)</option>
                 <option value="VISA">🔵 VISA (Fatura Cartão)</option>
-                <option value="MasterCard">🟴 MasterCard (Fatura Cartão)</option>
+                <option value="MasterCard">🔴 MasterCard (Fatura Cartão)</option>
               </select>
             </div>
 
-            {isCardTransaction && (
+            {(isCardTransaction || selectedBank === 'Santander' || selectedBank === 'Inter') && (
               <>
                 <div>
                   <label className="text-sm text-gray-400 block mb-2">Mês de Referência da Fatura *</label>
@@ -1009,7 +1140,7 @@ export function BankUpload({
             </div>
             
             {/* ✅ INTERFACE CONDICIONAL BASEADA NO MÉTODO */}
-            {(!isCardTransaction || inputMethod === 'file') && (
+            {((!isCardTransaction && selectedBank !== 'Santander' && selectedBank !== 'Inter') || inputMethod === 'file') && (
               <>
                 <button
                   onClick={() => fileInputRef.current?.click()}
@@ -1052,7 +1183,7 @@ export function BankUpload({
             )}
 
             {/* ✅ NOVA INTERFACE: Colar dados para cartões e Santander */}
-            {(isCardTransaction || selectedBank === 'Santander') && inputMethod === 'paste' && (
+            {(isCardTransaction || selectedBank === 'Santander' || selectedBank === 'Inter') && inputMethod === 'paste' && (
               <div className="space-y-3">
                 <div>
                   <label className="text-sm text-gray-400 block mb-2">
@@ -1062,15 +1193,19 @@ export function BankUpload({
                     value={pastedData}
                     onChange={(e) => setPastedData(e.target.value)}
                     disabled={isProcessing}
-                    placeholder={selectedBank === 'Santander' 
-                      ? `Exemplo formato Santander:\nSegunda, 1 de Setembro\nPix recebido kelvia c ferreira rosa\nCrédito\n100,00\nPix enviado iolanda winterman\nDébito\n-250,00` 
+                    placeholder={selectedBank === 'Santander'
+                      ? `Exemplo formato Santander:\nSegunda, 1 de Setembro\nPix recebido kelvia c ferreira rosa\nCrédito\n100,00\nPix enviado iolanda winterman\nDébito\n-250,00`
+                      : selectedBank === 'Inter'
+                      ? `Exemplo formato Inter:\nData Lançamento;Histórico;Descrição;Valor;Saldo\n17/09/2025;Crédito domicílio cartão;Cartão De Crédito - Inter Pag;602,59;35.594,62\n16/09/2025;Pix enviado ;Regina Helena Carvalho Magalhaes;-113,74;34.430,88\n16/09/2025;Pix recebido;Luiz Roberto Bettoni;990,00;33.544,62`
                       : `Exemplo formato ${selectedBank}:\n05/12/2024,NETFLIX,29.90\n10/12/2024,SPOTIFY,19.90\n15/12/2024,ESTORNO UBER,-15.50`}
                     className="w-full h-32 p-3 bg-gray-700 border border-gray-600 rounded-lg text-gray-100 font-mono text-sm resize-vertical"
                     rows={6}
                   />
                   <p className="text-xs text-gray-500 mt-1">
-                    {selectedBank === 'Santander' 
-                      ? 'Formato: Cole o texto completo do extrato (data, descrição, tipo, valor em linhas separadas)' 
+                    {selectedBank === 'Santander'
+                      ? 'Formato: Cole o texto completo do extrato (data, descrição, tipo, valor em linhas separadas)'
+                      : selectedBank === 'Inter'
+                      ? 'Formato: Data Lançamento;Histórico;Descrição;Valor;Saldo (uma transação por linha, com cabeçalho)'
                       : 'Formato: data,descrição,valor (uma transação por linha, sem cabeçalho)'
                     }
                   </p>

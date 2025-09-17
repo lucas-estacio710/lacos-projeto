@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Transaction, countsInBalance } from '@/types';
+import { formatDateForDisplay } from '@/lib/dateUtils';
 
 interface ContasTabProps {
   transactions: Transaction[];
@@ -66,14 +67,9 @@ export function ContasTab({ transactions }: ContasTabProps) {
     setExpandedBanco(expandedBanco === bancoCodigo ? null : bancoCodigo);
   };
 
-  // Função para formatar data
+  // Usar função centralizada para formatação de data
   const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: '2-digit'
-    });
+    return formatDateForDisplay(dateString);
   };
 
   // Definir bancos e suas configurações

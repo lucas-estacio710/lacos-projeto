@@ -613,7 +613,7 @@ function CreateWizard({ contas, categorias, criarConta, criarCategoria, criarSub
                 required
               >
                 <option value="">Selecione uma conta</option>
-                {contas.map(conta => (
+                {contas.sort((a, b) => a.nome.localeCompare(b.nome)).map(conta => (
                   <option key={conta.id} value={conta.id}>
                     {conta.nome} ({conta.codigo})
                   </option>
@@ -633,7 +633,7 @@ function CreateWizard({ contas, categorias, criarConta, criarCategoria, criarSub
                   required
                 >
                   <option value="">Selecione uma categoria</option>
-                  {filteredCategorias.map(categoria => (
+                  {filteredCategorias.sort((a, b) => a.nome.localeCompare(b.nome)).map(categoria => (
                     <option key={categoria.id} value={categoria.id}>
                       {categoria.icone} {categoria.nome} ({categoria.codigo})
                     </option>
@@ -1105,7 +1105,7 @@ function EditApp({ contas, categorias, subtipos, editingItem, setEditingItem, ed
                 className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
                 <option value="">Selecione uma conta</option>
-                {contas.map(conta => (
+                {contas.sort((a, b) => a.nome.localeCompare(b.nome)).map(conta => (
                   <option key={conta.id} value={conta.id}>
                     {conta.nome} ({conta.codigo})
                   </option>
@@ -1125,7 +1125,7 @@ function EditApp({ contas, categorias, subtipos, editingItem, setEditingItem, ed
                 className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
                 <option value="">Selecione uma categoria</option>
-                {categorias.map(categoria => (
+                {categorias.sort((a, b) => a.nome.localeCompare(b.nome)).map(categoria => (
                   <option key={categoria.id} value={categoria.id}>
                     {categoria.nome} ({categoria.codigo})
                   </option>
@@ -1186,7 +1186,7 @@ function EditApp({ contas, categorias, subtipos, editingItem, setEditingItem, ed
             Contas ({contas?.length || 0})
           </h4>
           <div className="flex-1 space-y-1.5 overflow-y-auto pr-1">
-            {contas?.map(conta => (
+            {contas?.sort((a, b) => a.nome.localeCompare(b.nome)).map(conta => (
               <div
                 key={conta.id}
                 onClick={() => handleSelectItem(conta, 'conta')}
@@ -1211,7 +1211,7 @@ function EditApp({ contas, categorias, subtipos, editingItem, setEditingItem, ed
             Categorias ({categorias?.length || 0})
           </h4>
           <div className="flex-1 space-y-1.5 overflow-y-auto pr-1">
-            {categorias?.map(categoria => {
+            {categorias?.sort((a, b) => a.nome.localeCompare(b.nome)).map(categoria => {
               const conta = contas?.find(c => c.id === categoria.conta_id);
               return (
                 <div
@@ -1241,7 +1241,7 @@ function EditApp({ contas, categorias, subtipos, editingItem, setEditingItem, ed
             Subtipos ({subtipos?.length || 0})
           </h4>
           <div className="flex-1 space-y-1.5 overflow-y-auto pr-1">
-            {subtipos?.map(subtipo => {
+            {subtipos?.sort((a, b) => a.nome.localeCompare(b.nome)).map(subtipo => {
               const categoria = categorias?.find(c => c.id === subtipo.categoria_id);
               const conta = contas?.find(c => c.id === categoria?.conta_id);
               return (
@@ -1275,7 +1275,7 @@ function EditApp({ contas, categorias, subtipos, editingItem, setEditingItem, ed
             Contas ({contas?.length || 0})
           </h4>
           <div className="space-y-1.5 max-h-48 overflow-y-auto">
-            {contas?.map(conta => (
+            {contas?.sort((a, b) => a.nome.localeCompare(b.nome)).map(conta => (
               <div
                 key={conta.id}
                 onClick={() => handleSelectItem(conta, 'conta')}
@@ -1300,7 +1300,7 @@ function EditApp({ contas, categorias, subtipos, editingItem, setEditingItem, ed
             Categorias ({categorias?.length || 0})
           </h4>
           <div className="space-y-1.5 max-h-48 overflow-y-auto">
-            {categorias?.map(categoria => {
+            {categorias?.sort((a, b) => a.nome.localeCompare(b.nome)).map(categoria => {
               const conta = contas?.find(c => c.id === categoria.conta_id);
               return (
                 <div
@@ -1330,7 +1330,7 @@ function EditApp({ contas, categorias, subtipos, editingItem, setEditingItem, ed
             Subtipos ({subtipos?.length || 0})
           </h4>
           <div className="space-y-1.5 max-h-64 overflow-y-auto">
-            {subtipos?.map(subtipo => {
+            {subtipos?.sort((a, b) => a.nome.localeCompare(b.nome)).map(subtipo => {
               const categoria = categorias?.find(c => c.id === subtipo.categoria_id);
               const conta = contas?.find(c => c.id === categoria?.conta_id);
               return (

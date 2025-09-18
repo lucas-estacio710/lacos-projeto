@@ -53,7 +53,7 @@ export function ManualEntryModal({ isOpen, onClose, onSuccess }: ManualEntryModa
 
   const [form, setForm] = useState<ManualEntryForm>({
     data: new Date().toISOString().split('T')[0],
-    valor: 0,
+    valor: '' as any, // Deixar vazio inicialmente
     origem: 'Manual',
     cc: 'Inter',
     descricao: '',
@@ -77,7 +77,7 @@ export function ManualEntryModal({ isOpen, onClose, onSuccess }: ManualEntryModa
     if (!isOpen) {
       setForm({
         data: new Date().toISOString().split('T')[0],
-        valor: 0,
+        valor: '' as any, // Deixar vazio
         origem: 'Manual',
         cc: 'Inter',
         descricao: '',
@@ -211,7 +211,7 @@ export function ManualEntryModal({ isOpen, onClose, onSuccess }: ManualEntryModa
     const newErrors: Record<string, string> = {};
 
     if (!form.data) newErrors.data = 'Data é obrigatória';
-    if (form.valor === 0) newErrors.valor = 'Valor deve ser diferente de zero';
+    if (!form.valor || form.valor === 0) newErrors.valor = 'Valor é obrigatório e deve ser diferente de zero';
     if (!form.descricao.trim()) newErrors.descricao = 'Descrição é obrigatória';
     // Classificação agora é opcional - pode ficar vazia para ir para InboxTab
 
@@ -308,11 +308,11 @@ export function ManualEntryModal({ isOpen, onClose, onSuccess }: ManualEntryModa
                 type="number"
                 step="0.01"
                 value={form.valor}
-                onChange={(e) => updateForm('valor', parseFloat(e.target.value) || 0)}
+                onChange={(e) => updateForm('valor', e.target.value === '' ? '' : parseFloat(e.target.value) || '')}
                 className={`w-full p-2 bg-gray-700 border border-gray-600 rounded text-white ${
                   errors.valor ? 'border-red-500' : ''
                 }`}
-                placeholder="0,00"
+                placeholder="Digite o valor (ex: 100,50 ou -50,25)"
                 required
               />
               {errors.valor && <p className="text-red-400 text-xs mt-1">{errors.valor}</p>}

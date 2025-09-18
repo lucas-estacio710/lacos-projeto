@@ -203,26 +203,45 @@ export function EnhancedUnclassifiedSection({
               const cardTransaction = item as CardTransaction;
               
               return (
-                <div key={`${item.id}-${idx}`} className="px-3 py-2 border-b border-gray-700/50 last:border-b-0 hover:bg-gray-700/30 transition-colors">
-                  <div className="flex items-center justify-between">
-                    {/* Lado esquerdo: Data - Descrição */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 text-sm text-gray-200">
-                        <span className="text-xs text-gray-400 flex-shrink-0">
-                          {formatDate(isTransaction ? transaction.data : cardTransaction.data_transacao)}
-                        </span>
-                        <span className="truncate">
-                          {item.descricao_origem || 'Sem descrição'}
-                        </span>
+                <div key={`${item.id}-${idx}`} className="py-2 border-b border-gray-700/50 last:border-b-0 hover:bg-gray-700/30 transition-colors">
+                  <div className="grid grid-cols-12 text-sm">
+                    {/* Coluna 1: Data (mesclada - 2 linhas) - 2 colunas */}
+                    <div className="col-span-2 row-span-2 flex flex-col justify-center items-center text-center">
+                      <div className="text-xs text-gray-400">
+                        {formatDate(isTransaction ? transaction.data : cardTransaction.data_transacao)}
+                      </div>
+                      <div className="text-xs font-bold text-gray-300 mt-0.5">
+                        {(() => {
+                          const date = new Date(isTransaction ? transaction.data : cardTransaction.data_transacao);
+                          const diasSemana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+                          return diasSemana[date.getDay()];
+                        })()}
                       </div>
                     </div>
-                    
-                    {/* Lado direito: Origem - Valor */}
-                    <div className="flex items-center gap-2 text-xs flex-shrink-0">
-                      <span className={getOriginColor(item.origem)}>{item.origem}</span>
-                      <span className={`font-medium ${item.valor >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+
+                    {/* Coluna 2: Descrição (mesclada - 2 linhas) - 5 colunas */}
+                    <div className="col-span-5 row-span-2 flex items-center">
+                      <div className="text-gray-200 leading-tight line-clamp-2" title={item.descricao_origem || 'Sem descrição'}>
+                        {item.descricao_origem || 'Sem descrição'}
+                      </div>
+                    </div>
+
+                    {/* Coluna 3: Origem (mesclada - 2 linhas) - 1 coluna */}
+                    <div className="col-span-1 row-span-2 flex items-center justify-end">
+                      <span className={`text-xs ${getOriginColor(item.origem)}`} title={item.origem}>
+                        {item.origem.length > 5 ? item.origem.substring(0, 5) + '...' : item.origem}
+                      </span>
+                    </div>
+
+                    {/* Coluna 4: Valor (linha 1) - 3 colunas */}
+                    <div className="col-span-3 flex items-center justify-end">
+                      <span className={`font-medium text-sm ${item.valor >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                         {item.valor >= 0 ? '+' : ''}R$ {formatCurrency(Math.abs(item.valor || 0))}
                       </span>
+                    </div>
+
+                    {/* Coluna 5: Setinha (linha 1) - 1 coluna */}
+                    <div className="col-span-1 flex items-center justify-end">
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -234,65 +253,68 @@ export function EnhancedUnclassifiedSection({
                         {expandedItem === item.id ? '▼' : '▶'}
                       </button>
                     </div>
+
+
+                    {/* Coluna 4: Checkbox (linha 2) - 2 colunas */}
+                    <div className="col-span-2 flex items-center justify-center">
+                      {onToggleItemSelection && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onToggleItemSelection(item.id);
+                          }}
+                          className={`w-6 h-6 rounded transition-colors flex items-center justify-center shadow-sm ${
+                            selectedItems.has(item.id)
+                              ? 'bg-blue-600 hover:bg-blue-500 text-white'
+                              : 'bg-gray-600 hover:bg-gray-500 text-gray-300'
+                          }`}
+                          title={selectedItems.has(item.id) ? "Desmarcar item" : "Marcar item"}
+                        >
+                          <CheckSquare size={12} />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Coluna 5: Classificação Complexa (linha 2) - 1 coluna */}
+                    <div className="col-span-1 flex items-center justify-center">
+                      {onMoveToComplexClassification && (
+                        <button
+                          onClick={() => handleMoveToComplexClassification(item as Transaction | CardTransaction)}
+                          className="w-6 h-6 bg-green-600 hover:bg-green-500 text-white rounded text-xs transition-colors flex items-center justify-center shadow-sm"
+                          title="Mover para Classificação Complexa"
+                        >
+                          🧩
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Coluna 6: Edição (linha 2) - 1 coluna */}
+                    <div className="col-span-1 flex items-center justify-center">
+                      <button
+                        onClick={() => {
+                          if (isTransaction && onEditTransaction) {
+                            onEditTransaction(transaction);
+                          } else if (!isTransaction && onEditCardTransaction) {
+                            onEditCardTransaction(cardTransaction);
+                          }
+                        }}
+                        className="w-6 h-6 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded text-xs transition-colors flex items-center justify-center shadow-sm"
+                        title="Editar/Classificar"
+                      >
+                        ✏️
+                      </button>
+                    </div>
                   </div>
                   
                   {/* Conteúdo expandido individual com informações detalhadas */}
                   {expandedItem === item.id && (
-                    <div className="mt-3 space-y-3 bg-gray-700 p-3 rounded border border-gray-600">
+                    <div className="mt-3 space-y-3 bg-gray-700 rounded border border-gray-600">
                       {/* Informações detalhadas */}
-                      <div className="space-y-2 text-sm">
-                        {/* Primeira linha: Descrição + Botões */}
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1 min-w-0">
-                            <div className="text-gray-200 break-words">{item.descricao_origem || 'Sem descrição'}</div>
-                          </div>
-                          
-                          {/* Botões de Ação na mesma linha */}
-                          <div className="flex items-center gap-1 flex-shrink-0">
-                            {/* Checkbox para MassiveChangeSubtipo */}
-                            {onToggleItemSelection && (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onToggleItemSelection(item.id);
-                                }}
-                                className={`w-7 h-7 rounded transition-colors flex items-center justify-center shadow-sm ${
-                                  selectedItems.has(item.id)
-                                    ? 'bg-blue-600 hover:bg-blue-500 text-white'
-                                    : 'bg-gray-600 hover:bg-gray-500 text-gray-300'
-                                }`}
-                                title={selectedItems.has(item.id) ? "Desmarcar item" : "Marcar item"}
-                              >
-                                <CheckSquare size={14} />
-                              </button>
-                            )}
-
-                            {/* Botão de Classificação Complexa */}
-                            {onMoveToComplexClassification && (
-                              <button
-                                onClick={() => handleMoveToComplexClassification(item as Transaction | CardTransaction)}
-                                className="w-7 h-7 bg-green-600 hover:bg-green-500 text-white rounded text-xs transition-colors flex items-center justify-center shadow-sm"
-                                title="Mover para Classificação Complexa"
-                              >
-                                🧩
-                              </button>
-                            )}
-
-                            {/* Botão de Edição */}
-                            <button
-                              onClick={() => {
-                                if (isTransaction && onEditTransaction) {
-                                  onEditTransaction(transaction);
-                                } else if (!isTransaction && onEditCardTransaction) {
-                                  onEditCardTransaction(cardTransaction);
-                                }
-                              }}
-                              className="w-7 h-7 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded text-xs transition-colors flex items-center justify-center shadow-sm"
-                              title="Editar/Classificar"
-                            >
-                              ✏️
-                            </button>
-                          </div>
+                      <div className="space-y-2 text-sm p-3">
+                        {/* Descrição completa */}
+                        <div>
+                          <span className="text-gray-400 text-xs block mb-1">Descrição Completa:</span>
+                          <div className="text-gray-200 break-words">{item.descricao_origem || 'Sem descrição'}</div>
                         </div>
                         
                         {/* Segunda linha: Cartão se necessário */}

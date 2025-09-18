@@ -733,7 +733,7 @@ const addTransactions = async (newTransactions: Transaction[]) => {
         origem: formData.origem,
         cc: formData.cc,
         realizado: formData.subtipo_id ? 's' as const : 'p' as const, // ✅ Se tem classificação = realizado, senão = pendente
-        subtipo_id: formData.subtipo_id, // ✅ ÚNICO campo de hierarquia
+        subtipo_id: formData.subtipo_id || null, // ✅ ÚNICO campo de hierarquia - null se vazio
         // Campos de reconciliação vazios para lançamento manual
         linked_future_group: undefined,
         is_from_reconciliation: false,

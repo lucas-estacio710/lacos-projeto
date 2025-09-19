@@ -16,6 +16,11 @@ export function ContasTab({ transactions }: ContasTabProps) {
     });
   };
 
+  // Função para verificar se um valor está próximo de zero
+  const isZero = (value: number) => {
+    return Math.abs(value) < 0.01; // Considera zero se for menor que 1 centavo
+  };
+
   // ✅ FUNÇÃO NOVA: Calcular saldo por banco incluindo previstas (s + p)
   const getSaldoCompletoPorBanco = (banco: string) => {
     return transactions
@@ -158,11 +163,11 @@ export function ContasTab({ transactions }: ContasTabProps) {
           <div className="min-w-0">
             <h3 className="text-base sm:text-2xl font-bold truncate">Patrimônio Total</h3>
             <p className="text-xs sm:text-sm text-purple-100 opacity-75 mt-1">
-              Classificado: R$ {formatCurrency(Math.abs(saldoTotalRealizado))}
+              Classificado: {isZero(saldoTotalRealizado) ? 'ZERADO' : 'R$ ' + formatCurrency(Math.abs(saldoTotalRealizado))}
             </p>
           </div>
           <div className="text-xl sm:text-4xl font-bold flex-shrink-0">
-            {saldoTotal < 0 ? '-' : ''}R$ {formatCurrency(Math.abs(saldoTotal))}
+            {isZero(saldoTotal) ? 'ZERADO' : (saldoTotal < 0 ? '-' : '') + 'R$ ' + formatCurrency(Math.abs(saldoTotal))}
           </div>
         </div>
       </div>
@@ -210,26 +215,26 @@ export function ContasTab({ transactions }: ContasTabProps) {
                     <div className="flex flex-col items-end gap-1">
                       {/* Saldo Real (s+p) - Principal */}
                       <div className={`${banco.corTexto} font-bold text-base md:text-lg min-w-[80px] md:min-w-[100px]`}>
-                        {banco.saldo < 0 ? '-' : ''}R$ {formatCurrency(Math.abs(banco.saldo))}
+                        {isZero(banco.saldo) ? 'ZERADO' : (banco.saldo < 0 ? '-' : '') + 'R$ ' + formatCurrency(Math.abs(banco.saldo))}
                       </div>
 
                       {/* Saldo Classificado (s) - Menor */}
                       <div className={`${banco.corTexto} text-xs opacity-75`}>
-                        Classif.: {banco.saldoRealizado < 0 ? '-' : ''}R$ {formatCurrency(Math.abs(banco.saldoRealizado))}
+                        Classif.: {isZero(banco.saldoRealizado) ? 'ZERADO' : (banco.saldoRealizado < 0 ? '-' : '') + 'R$ ' + formatCurrency(Math.abs(banco.saldoRealizado))}
                       </div>
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Seção expandida com transações do último dia */}
+              {/* Seção expandida com transações dos últimos 3 dias */}
               {isExpanded && (
                 <div className="bg-gray-800 rounded-lg p-4 border-l-4 border-gray-600">
                   <h4 className="text-white font-medium mb-3 flex items-center gap-2">
                     📅 Lançamentos de {banco.lastTransactionDate ? formatDate(banco.lastTransactionDate) : 'N/A'}
                     <span className="text-gray-400 text-sm">({lastDayTransactions.length} transações)</span>
                   </h4>
-                  
+
                   {lastDayTransactions.length > 0 ? (
                     <div className="space-y-2 max-h-64 overflow-y-auto">
                       {lastDayTransactions.map((transaction) => (

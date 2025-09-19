@@ -10,6 +10,29 @@ import { SummaryBox } from './SummaryBox';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { getQuickActionCategories } from '@/lib/smartClassification';
 
+// Function to get bank-specific colors for badges
+const getBankColor = (bankName: string): string => {
+  const colorMap: { [key: string]: string } = {
+    'Inter': 'bg-orange-500/20 text-orange-300 border border-orange-500/30',
+    'BB': 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/30',
+    'Nubank': 'bg-purple-500/20 text-purple-300 border border-purple-500/30',
+    'Stone': 'bg-green-500/20 text-green-300 border border-green-500/30',
+    'Santander': 'bg-red-600/20 text-red-300 border border-red-600/30',
+    'Sicoob': 'bg-blue-500/20 text-blue-300 border border-blue-500/30',
+    'VISA': 'bg-blue-600/20 text-blue-300 border border-blue-600/30',
+    'MasterCard': 'bg-red-500/20 text-red-300 border border-red-500/30',
+    'Dinheiro': 'bg-gray-500/20 text-gray-300 border border-gray-500/30',
+    'Investimento Inter': 'bg-orange-600/20 text-orange-300 border border-orange-600/30',
+    'Investimento Keka': 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30',
+    // 🎨 Novos investimentos
+    'Inv. CC Keka': 'bg-violet-600/20 text-violet-300 border border-violet-600/30',
+    'Inv. CC Luli': 'bg-blue-400/20 text-blue-300 border border-blue-400/30',
+    'Inv. PJ': 'bg-orange-700/20 text-orange-400 border border-orange-700/30'
+  };
+
+  return colorMap[bankName] || 'bg-gray-500/20 text-gray-300 border border-gray-500/30';
+};
+
 interface OverviewTabProps {
   transactions: Transaction[];
   onEditTransaction: (transaction: Transaction) => void;
@@ -92,6 +115,8 @@ export function OverviewTab({
     return currentYear + currentMonth;
   });
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedCCs, setSelectedCCs] = useState<Set<string>>(new Set());
+  const [showCCFilters, setShowCCFilters] = useState(false);
   const [showAggregates, setShowAggregates] = useState(true);
   const [selectedYear, setSelectedYear] = useState<string>(() => {
     // Começar com o ano atual
@@ -463,21 +488,48 @@ export function OverviewTab({
   };
 
   const filteredByPeriod = getSelectedPeriodTransactions();
-  
+
+  // Get unique CCs for filter buttons with custom order
+  const uniqueCCs = useMemo(() => {
+    const ccSet = new Set<string>();
+    transactions.forEach(t => {
+      if (t.cc && t.cc.trim()) {
+        ccSet.add(t.cc.trim());
+      }
+    });
+
+    const allCCs = Array.from(ccSet);
+    const priorityOrder = ['Inter', 'BB', 'Stone', 'Santander', 'Dinheiro'];
+
+    // First line: priority CCs that exist
+    const firstLine = priorityOrder.filter(cc => allCCs.includes(cc));
+
+    // Second line: remaining CCs
+    const secondLine = allCCs.filter(cc => !priorityOrder.includes(cc)).sort();
+
+    return { firstLine, secondLine, all: allCCs };
+  }, [transactions]);
+
   // Debug period filtering
   // console.log('🔍 filteredByPeriod:', filteredByPeriod.length);
   // console.log('🔍 filteredByPeriod CONC:', filteredByPeriod.filter(t => getTransactionAccount(t) === 'CONC').length);
 
-  // ===== APLICAR FILTRO DE BUSCA =====
+  // ===== APLICAR FILTROS DE BUSCA E CC =====
   const getFilteredTransactions = () => {
     let filtered = filteredByPeriod;
-    
+
+    // Filtro por termo de busca
     if (searchTerm) {
-      filtered = filtered.filter(t => 
+      filtered = filtered.filter(t =>
         t.descricao?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         getTransactionSubtype(t).toLowerCase().includes(searchTerm.toLowerCase()) ||
         t.descricao_origem?.toLowerCase().includes(searchTerm.toLowerCase())
       );
+    }
+
+    // Filtro por CC selecionados
+    if (selectedCCs.size > 0) {
+      filtered = filtered.filter(t => t.cc && selectedCCs.has(t.cc.trim()));
     }
     
     return filtered.sort((a, b) => {
@@ -488,6 +540,21 @@ export function OverviewTab({
   };
 
   const classifiedTransactions = getFilteredTransactions();
+
+  // CC Filter functions
+  const toggleCCFilter = (cc: string) => {
+    const newSelectedCCs = new Set(selectedCCs);
+    if (newSelectedCCs.has(cc)) {
+      newSelectedCCs.delete(cc);
+    } else {
+      newSelectedCCs.add(cc);
+    }
+    setSelectedCCs(newSelectedCCs);
+  };
+
+  const clearCCFilters = () => {
+    setSelectedCCs(new Set());
+  };
   
   // Debug classified transactions
   console.log('🔍 Classified transactions:', classifiedTransactions.length);
@@ -884,6 +951,84 @@ export function OverviewTab({
           />
         </div>
 
+        {/* CC Filter Section */}
+        {uniqueCCs.all.length > 0 && (
+          <div className="mt-4">
+            {/* Toggle Header */}
+            <div className="flex items-center justify-between w-full mb-2">
+              <button
+                onClick={() => setShowCCFilters(!showCCFilters)}
+                className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-300 transition-colors"
+              >
+                <ChevronDown className={`w-4 h-4 transition-transform ${showCCFilters ? 'rotate-180' : ''}`} />
+                <span>Filtrar por CC</span>
+                {selectedCCs.size > 0 && (
+                  <span className="text-xs bg-blue-600/30 text-blue-300 px-2 py-0.5 rounded-full">
+                    {selectedCCs.size}
+                  </span>
+                )}
+              </button>
+
+              {selectedCCs.size > 0 && showCCFilters && (
+                <button
+                  onClick={clearCCFilters}
+                  className="text-xs text-blue-400 hover:text-blue-300"
+                >
+                  Limpar
+                </button>
+              )}
+            </div>
+
+            {/* Collapsible Content */}
+            {showCCFilters && (
+              <div className="space-y-2">
+                {/* First line - Priority CCs */}
+                {uniqueCCs.firstLine.length > 0 && (
+                  <div className="flex flex-wrap justify-center gap-1.5">
+                    {uniqueCCs.firstLine.map(cc => {
+                      const isSelected = selectedCCs.has(cc);
+                      return (
+                        <button
+                          key={cc}
+                          onClick={() => toggleCCFilter(cc)}
+                          className={`px-2 py-1 rounded text-xs font-medium border transition-all ${
+                            isSelected
+                              ? getBankColor(cc).replace('/20', '/30').replace('border-gray-500/30', 'border-current') + ' ring-1 ring-current'
+                              : getBankColor(cc) + ' hover:bg-opacity-30'
+                          }`}
+                        >
+                          {cc}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Second line - Remaining CCs */}
+                {uniqueCCs.secondLine.length > 0 && (
+                  <div className="flex flex-wrap justify-center gap-1.5">
+                    {uniqueCCs.secondLine.map(cc => {
+                      const isSelected = selectedCCs.has(cc);
+                      return (
+                        <button
+                          key={cc}
+                          onClick={() => toggleCCFilter(cc)}
+                          className={`px-2 py-1 rounded text-xs font-medium border transition-all ${
+                            isSelected
+                              ? getBankColor(cc).replace('/20', '/30').replace('border-gray-500/30', 'border-current') + ' ring-1 ring-current'
+                              : getBankColor(cc) + ' hover:bg-opacity-30'
+                          }`}
+                        >
+                          {cc}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
       </div>
 
@@ -1362,8 +1507,11 @@ export function OverviewTab({
                                                   )}
                                                 </div>
                                                 
-                                                <div className="text-xs text-gray-400 mt-0.5">
-                                                  {formatDate(transaction.data)} • {transaction.descricao_origem}
+                                                <div className="text-xs text-gray-400 mt-0.5 flex items-center gap-2">
+                                                  <span>{formatDate(transaction.data)} • {transaction.descricao_origem}</span>
+                                                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getBankColor(transaction.cc)}`}>
+                                                    {transaction.cc}
+                                                  </span>
                                                 </div>
                                               </div>
                                               

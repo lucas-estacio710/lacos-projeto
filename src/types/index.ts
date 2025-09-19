@@ -105,10 +105,9 @@ export interface InterPagSplitResult {
 }
 
 // ✅ TIPO ATUALIZADO COM VISA E MASTERCARD
-export type BankType = 
-  | 'Inter' 
-  | 'BB' 
-  | 'Santander'
+export type BankType =
+  | 'Inter'
+  | 'BB'
   | 'TON'
   | 'Nubank' 
   | 'VISA' 

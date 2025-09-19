@@ -310,7 +310,7 @@ const addTransactions = async (newTransactions: Transaction[]) => {
           mes: mes,
           data: card.data_transacao,
           descricao_origem: card.descricao_origem,
-          subtipo_id: card.subtipo_id, // ✅ HERDAR classificação do card_transaction
+          subtipo_id: card.subtipo_id ?? null, // ✅ HERDAR classificação do card_transaction
           descricao: card.descricao_classificada || card.descricao_origem,
           valor: card.valor,
           origem: card.origem, // Mantém origem original (ex: "MasterCard", "VISA")
@@ -643,7 +643,10 @@ const addTransactions = async (newTransactions: Transaction[]) => {
         linked_future_group: originalTransaction.id, // ✅ Link para transação original
         is_from_reconciliation: originalTransaction.is_from_reconciliation,
         future_subscription_id: originalTransaction.future_subscription_id,
-        reconciliation_metadata: { ...originalTransaction.reconciliation_metadata, split_from: originalTransaction.id }
+        reconciliation_metadata: JSON.stringify({
+          ...JSON.parse(originalTransaction.reconciliation_metadata || '{}'),
+          split_from: originalTransaction.id
+        })
       }));
 
       const transactionsToInsert = newTransactions.map(nt => ({

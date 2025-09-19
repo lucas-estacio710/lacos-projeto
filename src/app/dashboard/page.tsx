@@ -863,6 +863,7 @@ export default function DashboardPage() {
           onClose={() => setShowBankUpload(false)}
           onTransactionsImported={handleTransactionsImported}
           onCardTransactionsImported={handleCardTransactionsImported}
+          existingTransactions={transactions} // ✅ NOVA PROP: Para calcular prévia do saldo
         />
 
         <EditTransactionModal

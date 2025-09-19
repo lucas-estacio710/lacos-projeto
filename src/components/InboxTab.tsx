@@ -421,34 +421,6 @@ export function InboxTab({
             </select>
           </div>
 
-          {/* Indicador de proteção mobile ativo */}
-          {totalPending > 0 && (
-            <div className="bg-amber-900/30 border border-amber-600 rounded-lg p-2 mb-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="text-amber-400">🛡️</span>
-                  <span className="text-amber-200">
-                    Proteção ativa - Gestos acidentais bloqueados
-                  </span>
-                </div>
-                <button
-                  onClick={() => {
-                    if (window.confirm('Você tem transações não classificadas. Deseja realmente voltar? Você pode perder seu progresso.')) {
-                      markAsSafe();
-                      window.history.back();
-                    }
-                  }}
-                  className="px-2 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded text-xs transition-colors"
-                  title="Voltar com confirmação"
-                >
-                  ← Voltar
-                </button>
-              </div>
-              <div className="text-xs text-amber-300 mt-1">
-                💡 Dica: Segure na lateral por 500ms para navegar normalmente
-              </div>
-            </div>
-          )}
 
           {/* Indicador de resultados da busca */}
           {(searchTerm || selectedOrigin !== 'todos') && (

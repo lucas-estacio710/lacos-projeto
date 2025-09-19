@@ -297,9 +297,10 @@ const addTransactions = async (newTransactions: Transaction[]) => {
         const transactionId = `REC_${card.id}`;
         
         // Determinar o mês baseado na data (formato AAMM)
-        const dateParts = card.data_transacao.split('-');
-        const mes = dateParts.length === 3 
-          ? `${dateParts[0].slice(-2)}${dateParts[1]}` 
+        // ✅ USAR data da transação de pagamento (regime de competência)
+        const dateParts = linkedPaymentTransaction.data.split('-');
+        const mes = dateParts.length === 3
+          ? `${dateParts[0].slice(-2)}${dateParts[1]}`
           : '';
 
         // Conta será determinada por trigger no banco baseada no subtipo_id
@@ -309,7 +310,7 @@ const addTransactions = async (newTransactions: Transaction[]) => {
           mes: mes,
           data: card.data_transacao,
           descricao_origem: card.descricao_origem,
-          subtipo_id: null, // Será classificado depois
+          subtipo_id: card.subtipo_id, // ✅ HERDAR classificação do card_transaction
           descricao: card.descricao_classificada || card.descricao_origem,
           valor: card.valor,
           origem: card.origem, // Mantém origem original (ex: "MasterCard", "VISA")
@@ -609,37 +610,40 @@ const addTransactions = async (newTransactions: Transaction[]) => {
 
       // Account será determinado por trigger no banco
 
-      // ETAPA 1: Deletar transação original
-      const { error: deleteError } = await supabase
+      // ETAPA 1: Marcar transação original como reconciliada (auditoria)
+      const { error: updateError } = await supabase
         .from('transactions')
-        .delete()
+        .update({
+          realizado: 'r',
+          descricao: `${originalTransaction.descricao} (DIVIDIDA)`
+        })
         .eq('id', originalTransaction.id)
         .eq('user_id', user.id);
 
-      if (deleteError) {
-        throw deleteError;
+      if (updateError) {
+        throw updateError;
       }
 
-      console.log('✅ Transação original deletada');
+      console.log('✅ Transação original marcada como reconciliada para auditoria');
 
       // ETAPA 2: Criar novas transações divididas
       
-      // ✅ CORREÇÃO: Usar apenas subtipo_id
+      // ✅ CORREÇÃO: Usar apenas subtipo_id e adicionar referência à transação original
       const newTransactions: Omit<Transaction, 'user_id'>[] = parts.map((part, index) => ({
-        id: `${originalTransaction.id}-${index + 1}`,
+        id: `${originalTransaction.id}-SPLIT-${index + 1}`,
         mes: originalTransaction.mes,
         data: originalTransaction.data,
-        descricao_origem: originalTransaction.descricao_origem,
+        descricao_origem: `${originalTransaction.descricao_origem} (parte ${index + 1}/${parts.length})`,
         subtipo_id: part.subtipo_id,
         descricao: part.descricao,
         valor: part.valor,
-        origem: originalTransaction.origem,
+        origem: `${originalTransaction.origem} - Divisão`,
         cc: originalTransaction.cc,
         realizado: 's' as const,
-        linked_future_group: originalTransaction.linked_future_group,
+        linked_future_group: originalTransaction.id, // ✅ Link para transação original
         is_from_reconciliation: originalTransaction.is_from_reconciliation,
         future_subscription_id: originalTransaction.future_subscription_id,
-        reconciliation_metadata: originalTransaction.reconciliation_metadata
+        reconciliation_metadata: { ...originalTransaction.reconciliation_metadata, split_from: originalTransaction.id }
       }));
 
       const transactionsToInsert = newTransactions.map(nt => ({
@@ -660,8 +664,13 @@ const addTransactions = async (newTransactions: Transaction[]) => {
 
       // ETAPA 3: Atualizar estado local
       setTransactions(prev => {
-        const withoutOriginal = prev.filter(t => t.id !== originalTransaction.id);
-        
+        // Atualizar transação original para realizado = 'r' (auditoria)
+        const updatedOriginal = prev.map(t =>
+          t.id === originalTransaction.id
+            ? { ...t, realizado: 'r' as const, descricao: `${t.descricao} (DIVIDIDA)` }
+            : t
+        );
+
         // ✅ CORREÇÃO: Mapear corretamente com tipos seguros
         const newTransactionObjects: Transaction[] = newTransactions.map(nt => ({
           id: nt.id,
@@ -679,8 +688,9 @@ const addTransactions = async (newTransactions: Transaction[]) => {
           future_subscription_id: nt.future_subscription_id,
           reconciliation_metadata: nt.reconciliation_metadata
         }));
-        
-        return [...withoutOriginal, ...newTransactionObjects];
+
+        // Adicionar novas transações divididas ao estado atualizado
+        return [...updatedOriginal, ...newTransactionObjects];
       });
 
       console.log('✅ Divisão da transação concluída com sucesso');

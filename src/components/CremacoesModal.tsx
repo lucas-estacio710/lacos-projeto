@@ -257,29 +257,44 @@ export function CremacoesModal({
       if (parts.length !== 3) return;
 
       const [dateStr, nameAndPet, valueStr] = parts;
-      
+
       // Parse nome-pet-tipo
       const nameParts = nameAndPet.split('-');
       if (nameParts.length < 3) return;
-      
+
       const tipo = nameParts[nameParts.length - 1]; // Último item é o tipo
       const pet = nameParts[nameParts.length - 2]; // Penúltimo é o pet
       const nome = nameParts.slice(0, -2).join('-'); // Resto é o nome
-      
+
       // Parse valor
       const valor = parseFloat(valueStr);
-      
+
+      // ✅ Parse data da colagem (formato DD/MM/AAAA -> YYYY-MM-DD)
+      let parsedDate = baseTransaction.data; // Fallback para data original
+      try {
+        const [day, month, year] = dateStr.split('/');
+        if (day && month && year) {
+          parsedDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+        }
+      } catch (error) {
+        console.warn('⚠️ Erro ao processar data da colagem, usando data original:', dateStr);
+      }
+
       // Determinar subtipo baseado no tipo
       const isIndividual = tipo.toUpperCase() === 'INDIVIDUAL';
       const subtipo_id = isIndividual ? SUBTIPO_CREMACAO_INDIVIDUAL : SUBTIPO_CREMACAO_COLETIVA;
-      
-      // Gerar ID único
-      const id = `CREM${index.toString().padStart(3, '0')}`;
-      
+
+      // ✅ Gerar ID único baseado nos dados (NOME_PET_TIMESTAMP)
+      const timestamp = Date.now() + index; // Evitar duplicatas no mesmo milissegundo
+      const nomeCode = nome.toUpperCase().replace(/[^A-Z0-9]/g, '').substring(0, 4);
+      const petCode = pet.toUpperCase().replace(/[^A-Z0-9]/g, '').substring(0, 3);
+      const tipoCode = tipo.toUpperCase().substring(0, 1); // I=Individual, C=Coletiva
+      const id = `CREM_${nomeCode}_${petCode}_${tipoCode}_${timestamp}`;
+
       const transaction = {
         id,
-        mes: baseTransaction.mes, // Herdar mes da transação original
-        data: baseTransaction.data, // Herdar data da transação original
+        mes: baseTransaction.mes, // ✅ Herdar mes da transação original
+        data: parsedDate, // ✅ Usar data da colagem
         descricao_origem: baseTransaction.descricao_origem, // Herdar da transação original
         descricao: `${nome.toUpperCase()} - ${pet.toUpperCase()} - ${tipo.toUpperCase()}`,
         valor: valor,
@@ -318,7 +333,7 @@ export function CremacoesModal({
   // Função para gerar preview do texto automático
   const generateAutomaticPreview = () => {
     // Limpar apenas preview automático existente, manter manuais
-    setPreviewTransactions(prev => prev.filter(t => t.id.startsWith('MANUAL_') || t.id.startsWith('CREM')));
+    setPreviewTransactions(prev => prev.filter(t => t.id.startsWith('MANUAL_')));
     
     // Gerar novos automáticos
     if (!textToParse.trim()) {
@@ -338,29 +353,44 @@ export function CremacoesModal({
       if (parts.length !== 3) return;
 
       const [dateStr, nameAndPet, valueStr] = parts;
-      
+
       // Parse nome-pet-tipo
       const nameParts = nameAndPet.split('-');
       if (nameParts.length < 3) return;
-      
+
       const tipo = nameParts[nameParts.length - 1];
       const pet = nameParts[nameParts.length - 2];
       const nome = nameParts.slice(0, -2).join('-');
-      
+
       // Parse valor
       const valor = parseFloat(valueStr);
-      
+
+      // ✅ Parse data da colagem (formato DD/MM/AAAA -> YYYY-MM-DD)
+      let parsedDate = baseTransaction.data; // Fallback para data original
+      try {
+        const [day, month, year] = dateStr.split('/');
+        if (day && month && year) {
+          parsedDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+        }
+      } catch (error) {
+        console.warn('⚠️ Erro ao processar data da colagem, usando data original:', dateStr);
+      }
+
       // Determinar subtipo baseado no tipo
       const isIndividual = tipo.toUpperCase() === 'INDIVIDUAL';
       const subtipo_id = isIndividual ? SUBTIPO_CREMACAO_INDIVIDUAL : SUBTIPO_CREMACAO_COLETIVA;
-      
-      // Gerar ID único
-      const id = `CREM${index.toString().padStart(3, '0')}`;
-      
+
+      // ✅ Gerar ID único baseado nos dados (NOME_PET_TIMESTAMP)
+      const timestamp = Date.now() + index; // Evitar duplicatas no mesmo milissegundo
+      const nomeCode = nome.toUpperCase().replace(/[^A-Z0-9]/g, '').substring(0, 4);
+      const petCode = pet.toUpperCase().replace(/[^A-Z0-9]/g, '').substring(0, 3);
+      const tipoCode = tipo.toUpperCase().substring(0, 1); // I=Individual, C=Coletiva
+      const id = `CREM_${nomeCode}_${petCode}_${tipoCode}_${timestamp}`;
+
       const transaction = {
         id,
-        mes: baseTransaction.mes, // Herdar mes da transação original
-        data: baseTransaction.data, // Herdar data da transação original
+        mes: baseTransaction.mes, // ✅ Herdar mes da transação original
+        data: parsedDate, // ✅ Usar data da colagem
         descricao_origem: baseTransaction.descricao_origem, // Herdar da transação original
         descricao: `${nome.toUpperCase()} - ${pet.toUpperCase()} - ${tipo.toUpperCase()}`,
         valor: valor,

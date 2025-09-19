@@ -12,13 +12,15 @@ interface BankUploadProps {
   onClose: () => void;
   onTransactionsImported: (transactions: Transaction[]) => Promise<{ success: boolean; stats?: { total: number; added: number; duplicates: number } } | void>;
   onCardTransactionsImported?: (transactions: CardTransaction[]) => Promise<any>;
+  existingTransactions?: Transaction[]; // ✅ NOVA PROP: Para calcular prévia do saldo
 }
 
-export function BankUpload({ 
-  isOpen, 
-  onClose, 
+export function BankUpload({
+  isOpen,
+  onClose,
   onTransactionsImported,
-  onCardTransactionsImported 
+  onCardTransactionsImported,
+  existingTransactions = [] // ✅ NOVA PROP
 }: BankUploadProps) {
   const [selectedBank, setSelectedBank] = useState<BankType>('Inter');
   const [referenceMes, setReferenceMes] = useState('');
@@ -26,6 +28,78 @@ export function BankUpload({
   const [inputMethod, setInputMethod] = useState<'file' | 'paste'>('paste'); // ✅ PADRÃO: Colar dados
   const [pastedData, setPastedData] = useState(''); // ✅ NOVO: Dados colados
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ✅ FUNÇÃO: Detectar se primeira linha é cabeçalho do BB
+  const detectBBHeader = (lines: string[]): boolean => {
+    if (lines.length === 0) return false;
+
+    const firstLine = lines[0].trim();
+    if (!firstLine) return false;
+
+    // Parse da primeira linha
+    const cols: string[] = [];
+    let current = '';
+    let inQuotes = false;
+
+    for (let j = 0; j < firstLine.length; j++) {
+      const char = firstLine[j];
+      if (char === '"') {
+        inQuotes = !inQuotes;
+      } else if (char === ',' && !inQuotes) {
+        cols.push(current.trim());
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    cols.push(current.trim());
+
+    // Verificar se primeira linha tem padrões de cabeçalho
+    if (cols.length >= 5) {
+      const data = cols[0].replace(/^"|"$/g, '').trim().toLowerCase();
+      const lancamento = cols[1].replace(/^"|"$/g, '').trim().toLowerCase();
+      const valor = cols[4].replace(/^"|"$/g, '').trim().toLowerCase();
+
+      // Padrões de cabeçalho
+      const headerPatterns = [
+        'data', 'date', 'lançamento', 'lancamento', 'histórico', 'historico',
+        'valor', 'value', 'tipo', 'type', 'descrição', 'descricao', 'detalhes'
+      ];
+
+      // Se algum campo contém padrão de cabeçalho, é cabeçalho
+      return headerPatterns.some(pattern =>
+        data.includes(pattern) ||
+        lancamento.includes(pattern) ||
+        valor.includes(pattern)
+      );
+    }
+
+    return false;
+  };
+
+  // ✅ FUNÇÃO: Calcular saldo atual do banco (igual ContasTab)
+  const getSaldoAtualBanco = (bancoCodigo: string) => {
+    return existingTransactions
+      .filter(t =>
+        t.cc === bancoCodigo &&
+        (t.realizado === 's' || t.realizado === 'p') // s + p
+      )
+      .reduce((sum, t) => sum + t.valor, 0);
+  };
+
+  // ✅ FUNÇÃO: Mapear banco selecionado para código do banco
+  const getBankCode = (selectedBank: string): string => {
+    const bankMapping: Record<string, string> = {
+      'Inter': 'Inter',
+      'BB': 'BB',
+      'Santander': 'Santander',
+      'TON': 'Stone',
+      'Nubank': 'MasterCard', // Cartões usam códigos diferentes
+      'VISA': 'VISA',
+      'MasterCard': 'MasterCard'
+    };
+    return bankMapping[selectedBank] || selectedBank;
+  };
 
   // ✅ FUNÇÃO PARA CALCULAR SOMATÓRIA DOS DADOS COLADOS
   const calculatePastedDataSummary = () => {
@@ -102,6 +176,60 @@ export function BankUpload({
           }
         }
       }
+    } else if (selectedBank === 'BB') {
+      // Para BB (formato: "data","lançamento","detalhes","nº doc","valor","tipo")
+      const hasHeader = detectBBHeader(lines);
+      const startIndex = hasHeader ? 1 : 0; // ✅ Detecção automática de cabeçalho
+
+      for (let i = startIndex; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        // Parse CSV com aspas (igual ao processamento de arquivo)
+        const cols: string[] = [];
+        let current = '';
+        let inQuotes = false;
+
+        for (let j = 0; j < line.length; j++) {
+          const char = line[j];
+          if (char === '"') {
+            inQuotes = !inQuotes;
+          } else if (char === ',' && !inQuotes) {
+            cols.push(current.trim());
+            current = '';
+          } else {
+            current += char;
+          }
+        }
+        cols.push(current.trim());
+
+        if (cols.length >= 5) {
+          const data = cols[0].replace(/^"|"$/g, '').trim();
+          const lancamento = cols[1].replace(/^"|"$/g, '').trim();
+          const detalhes = cols[2].replace(/^"|"$/g, '').trim();
+          const valorStr = cols[4].replace(/^"|"$/g, '').trim();
+
+          // Validações expandidas para formato de extrato
+          const lancamentosIgnorados = [
+            'SALDO ANTERIOR', 'S A L D O', 'SALDO', 'SALDO ATUAL', 'SALDO FINAL', 'SALDO DO DIA'
+          ];
+
+          const descricao_origem = `${lancamento}${detalhes ? ' - ' + detalhes : ''}`.trim();
+          const shouldIgnore = lancamentosIgnorados.some(termo =>
+            lancamento.toUpperCase().includes(termo) ||
+            descricao_origem.toUpperCase().includes(termo)
+          );
+
+          // Ignorar também linhas com data inválida (00/00/0000) ou sem data válida
+          if (!shouldIgnore && data.match(/^\d{1,2}\/\d{1,2}\/\d{4}$/) && data !== '00/00/0000' && descricao_origem && descricao_origem !== ' - ') {
+            const valor = parseBBValue(valorStr);
+            if (!isNaN(valor) && valor !== 0) {
+              total += valor;
+              validCount++;
+            }
+          }
+        }
+      }
     } else if (selectedBank === 'Santander') {
       // Para Santander (formato texto especial)
       let i = 0;
@@ -162,7 +290,7 @@ export function BankUpload({
           const valorStr = cols[4].replace(/^"|"$/g, '').trim();
           const valor = parseBBValue(valorStr);
           if (!isNaN(valor) && valor !== 0) {
-            total += Math.abs(valor);
+            total += valor; // ✅ CORREÇÃO: Manter sinal original do valor
             validCount++;
           }
         }
@@ -549,6 +677,100 @@ export function BankUpload({
     return '';
   };
 
+  // ✅ FUNÇÃO: Processar extrato do BB
+  const processBBTransactions = async (lines: string[]): Promise<Transaction[]> => {
+    const transactions: Transaction[] = [];
+    const usedIds = new Set<string>();
+
+    // ✅ Detecção automática de cabeçalho
+    const hasHeader = detectBBHeader(lines);
+    const startIndex = hasHeader ? 1 : 0;
+
+    for (let i = startIndex; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+
+      // Parse CSV com aspas (igual ao processamento de arquivo)
+      const cols: string[] = [];
+      let current = '';
+      let inQuotes = false;
+
+      for (let j = 0; j < line.length; j++) {
+        const char = line[j];
+        if (char === '"') {
+          inQuotes = !inQuotes;
+        } else if (char === ',' && !inQuotes) {
+          cols.push(current.trim());
+          current = '';
+        } else {
+          current += char;
+        }
+      }
+      cols.push(current.trim());
+
+      if (cols.length >= 5) {
+        const data = cols[0].replace(/^"|"$/g, '').trim();
+        const lancamento = cols[1].replace(/^"|"$/g, '').trim();
+        const detalhes = cols[2].replace(/^"|"$/g, '').trim();
+        const valorStr = cols[4].replace(/^"|"$/g, '').trim();
+
+        const descricao_origem = `${lancamento}${detalhes ? ' - ' + detalhes : ''}`.trim();
+
+        // Validações expandidas para formato de extrato
+        const lancamentosIgnorados = [
+          'SALDO ANTERIOR', 'S A L D O', 'SALDO', 'SALDO ATUAL', 'SALDO FINAL', 'SALDO DO DIA'
+        ];
+
+        const shouldIgnore = lancamentosIgnorados.some(termo =>
+          lancamento.toUpperCase().includes(termo) ||
+          descricao_origem.toUpperCase().includes(termo)
+        );
+
+        // Ignorar também linhas com data inválida (00/00/0000) ou sem data válida
+        if (shouldIgnore || !data.match(/^\d{1,2}\/\d{1,2}\/\d{4}$/) || data === '00/00/0000' || !descricao_origem || descricao_origem === ' - ') {
+          continue;
+        }
+
+        const valor = parseBBValue(valorStr);
+        const nroDocumento = cols[3]?.replace(/^"|"$/g, '').trim() || '';
+
+        const id = generateUniqueID('BB', data, descricao_origem, valor, nroDocumento);
+
+        if (usedIds.has(id)) {
+          console.log(`⚠️ ID duplicado encontrado: ${id}`);
+          continue;
+        }
+        usedIds.add(id);
+
+        // Converter data de DD/MM/YYYY para YYYY-MM-DD
+        const [dia, mes, ano] = data.split('/');
+        const formattedDate = `${ano}-${mes.padStart(2, '0')}-${dia.padStart(2, '0')}`;
+
+        // Determinar o mês (formato AAMM)
+        const anoFormatted = ano.slice(-2);
+        const mesFormatted = mes.padStart(2, '0');
+        const mesReferencia = `${anoFormatted}${mesFormatted}`;
+
+        const transaction: Transaction = {
+          id,
+          mes: mesReferencia,
+          data: formattedDate,
+          descricao_origem,
+          subtipo_id: '',
+          descricao: '',
+          valor,
+          origem: 'BB',
+          cc: 'BB',
+          realizado: 'p'
+        };
+
+        transactions.push(transaction);
+      }
+    }
+
+    console.log(`📊 BB: ${transactions.length} transações processadas`);
+    return transactions;
+  };
 
   // ✅ NOVA FUNÇÃO: Processar dados colados
   const handlePasteProcess = async () => {
@@ -650,8 +872,38 @@ export function BankUpload({
         alert(message);
         setPastedData(''); // Limpar dados após processar
         onClose();
+      } else if (selectedBank === 'BB') {
+        // ===== PROCESSAR BB =====
+        const importedTransactions = await processBBTransactions(lines);
+
+        if (importedTransactions.length === 0) {
+          alert('⚠️ Nenhuma transação válida encontrada nos dados colados do BB');
+          return;
+        }
+
+        console.log(`🎯 Enviando ${importedTransactions.length} transações do BB para o sistema`);
+
+        // Enviar para o hook de transações
+        const result = await onTransactionsImported(importedTransactions);
+
+        let message = `✅ Importação do BB concluída!\n\n`;
+        message += `📊 ${importedTransactions.length} transações processadas\n`;
+        message += `📍 Todas as transações foram marcadas como pendentes\n`;
+        message += `📥 Vá para a InboxTab para classificá-las\n`;
+
+        if (result && typeof result === 'object' && 'stats' in result) {
+          const stats = result.stats!;
+          message += `\n📈 Estatísticas:\n`;
+          message += `• Total processadas: ${stats.total}\n`;
+          message += `• Novas adicionadas: ${stats.added}\n`;
+          message += `• Duplicatas ignoradas: ${stats.duplicates}`;
+        }
+
+        alert(message);
+        setPastedData(''); // Limpar dados após processar
+        onClose();
       } else {
-        alert('⚠️ Entrada manual disponível apenas para cartões de crédito (Nubank, VISA, MasterCard), Santander e Inter');
+        alert('⚠️ Entrada manual disponível apenas para cartões de crédito (Nubank, VISA, MasterCard), Santander, Inter e BB');
       }
     } catch (error) {
       console.error('❌ Erro ao processar dados colados:', error);
@@ -1081,7 +1333,7 @@ export function BankUpload({
               </select>
             </div>
 
-            {(isCardTransaction || selectedBank === 'Santander' || selectedBank === 'Inter') && (
+            {isCardTransaction && (
               <>
                 <div>
                   <label className="text-sm text-gray-400 block mb-2">Mês de Referência da Fatura *</label>
@@ -1140,7 +1392,7 @@ export function BankUpload({
             </div>
             
             {/* ✅ INTERFACE CONDICIONAL BASEADA NO MÉTODO */}
-            {((!isCardTransaction && selectedBank !== 'Santander' && selectedBank !== 'Inter') || inputMethod === 'file') && (
+            {((!isCardTransaction && selectedBank !== 'Santander' && selectedBank !== 'Inter' && selectedBank !== 'BB') || inputMethod === 'file') && (
               <>
                 <button
                   onClick={() => fileInputRef.current?.click()}
@@ -1183,7 +1435,7 @@ export function BankUpload({
             )}
 
             {/* ✅ NOVA INTERFACE: Colar dados para cartões e Santander */}
-            {(isCardTransaction || selectedBank === 'Santander' || selectedBank === 'Inter') && inputMethod === 'paste' && (
+            {(isCardTransaction || selectedBank === 'Santander' || selectedBank === 'Inter' || selectedBank === 'BB') && inputMethod === 'paste' && (
               <div className="space-y-3">
                 <div>
                   <label className="text-sm text-gray-400 block mb-2">
@@ -1197,6 +1449,8 @@ export function BankUpload({
                       ? `Exemplo formato Santander:\nSegunda, 1 de Setembro\nPix recebido kelvia c ferreira rosa\nCrédito\n100,00\nPix enviado iolanda winterman\nDébito\n-250,00`
                       : selectedBank === 'Inter'
                       ? `Exemplo formato Inter:\nData Lançamento;Histórico;Descrição;Valor;Saldo\n17/09/2025;Crédito domicílio cartão;Cartão De Crédito - Inter Pag;602,59;35.594,62\n16/09/2025;Pix enviado ;Regina Helena Carvalho Magalhaes;-113,74;34.430,88\n16/09/2025;Pix recebido;Luiz Roberto Bettoni;990,00;33.544,62`
+                      : selectedBank === 'BB'
+                      ? `Exemplo formato BB (com ou sem cabeçalho):\n"01/08/2025","Pix - Recebido","01/08 13:43 00036901705832 KELVIA ROSA","11343035112562","2.081,39","Entrada"\n"01/08/2025","Pix - Enviado","01/08 09:53 Pagaleve Instituicao De Pa","80102","-61,10","Saída"\n"01/08/2025","Pagamento de Boleto","COMPANHIA ENERGIA","80103","-125,40","Saída"`
                       : `Exemplo formato ${selectedBank}:\n05/12/2024,NETFLIX,29.90\n10/12/2024,SPOTIFY,19.90\n15/12/2024,ESTORNO UBER,-15.50`}
                     className="w-full h-32 p-3 bg-gray-700 border border-gray-600 rounded-lg text-gray-100 font-mono text-sm resize-vertical"
                     rows={6}
@@ -1206,35 +1460,99 @@ export function BankUpload({
                       ? 'Formato: Cole o texto completo do extrato (data, descrição, tipo, valor em linhas separadas)'
                       : selectedBank === 'Inter'
                       ? 'Formato: Data Lançamento;Histórico;Descrição;Valor;Saldo (uma transação por linha, com cabeçalho)'
+                      : selectedBank === 'BB'
+                      ? 'Formato: "data","lançamento","detalhes","nº doc","valor","tipo" (CSV com aspas, com ou sem cabeçalho, uma transação por linha)'
                       : 'Formato: data,descrição,valor (uma transação por linha, sem cabeçalho)'
                     }
                   </p>
                 </div>
 
-                <button
-                  onClick={handlePasteProcess}
-                  disabled={isProcessing || !pastedData.trim()}
-                  className={`w-full p-4 rounded-lg transition-colors font-medium ${
-                    isProcessing || !pastedData.trim()
-                      ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                      : 'bg-green-600 hover:bg-green-500 text-white'
-                  }`}
-                >
-                  {isProcessing ? (
-                    <div className="flex items-center justify-center">
-                      <div className="w-5 h-5 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      Processando...
-                    </div>
-                  ) : (
-                    (() => {
-                      const { count, total } = calculatePastedDataSummary();
-                      return `🚀 Processar ${count} Transações | R$ ${formatCurrency(Math.abs(total))}`;
-                    })()
-                  )}
-                </button>
+                <div className="flex gap-3">
+                  {/* Botão Limpar Dados */}
+                  <button
+                    onClick={() => setPastedData('')}
+                    disabled={isProcessing || !pastedData.trim()}
+                    className={`px-4 py-3 rounded-lg transition-colors font-medium ${
+                      isProcessing || !pastedData.trim()
+                        ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                        : 'bg-red-600 hover:bg-red-500 text-white'
+                    }`}
+                    title="Limpar dados colados"
+                  >
+                    🗑️ Limpar
+                  </button>
+
+                  {/* Botão Processar */}
+                  <button
+                    onClick={handlePasteProcess}
+                    disabled={isProcessing || !pastedData.trim()}
+                    className={`flex-1 p-4 rounded-lg transition-colors font-medium ${
+                      isProcessing || !pastedData.trim()
+                        ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                        : 'bg-green-600 hover:bg-green-500 text-white'
+                    }`}
+                  >
+                    {isProcessing ? (
+                      <div className="flex items-center justify-center">
+                        <div className="w-5 h-5 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        Processando...
+                      </div>
+                    ) : (
+                      (() => {
+                        const { count, total } = calculatePastedDataSummary();
+                        return `🚀 Processar ${count} Transações | R$ ${formatCurrency(Math.abs(total))}`;
+                      })()
+                    )}
+                  </button>
+                </div>
+
+                {/* ✅ NOVA SEÇÃO: Prévia do saldo do banco (só para bancos, não cartões) */}
+                {!isCardTransaction && pastedData.trim() && (
+                  (() => {
+                    const { count, total } = calculatePastedDataSummary();
+                    if (count === 0) return null;
+
+                    const bankCode = getBankCode(selectedBank);
+                    const saldoAtual = getSaldoAtualBanco(bankCode);
+                    const saldoFinal = saldoAtual + total;
+
+                    return (
+                      <div className="mt-4 bg-blue-900/30 border border-blue-700 rounded-lg p-4">
+                        <h4 className="text-blue-100 font-medium mb-3 flex items-center gap-2">
+                          📊 Prévia do Saldo - {selectedBank}
+                        </h4>
+                        <div className="space-y-2 text-sm">
+                          <div className="flex justify-between items-center">
+                            <span className="text-blue-200">Saldo Atual:</span>
+                            <span className={`font-mono font-bold ${saldoAtual >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                              {saldoAtual < 0 ? '-' : ''}R$ {formatCurrency(Math.abs(saldoAtual))}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-blue-200">Lote a importar:</span>
+                            <span className={`font-mono font-bold ${total >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                              {total >= 0 ? '+' : ''}R$ {formatCurrency(Math.abs(total))}
+                            </span>
+                          </div>
+                          <div className="border-t border-blue-600 pt-2 mt-2">
+                            <div className="flex justify-between items-center">
+                              <span className="text-blue-100 font-medium">Saldo Final:</span>
+                              <span className={`font-mono font-bold text-lg ${saldoFinal >= 0 ? 'text-green-300' : 'text-red-300'}`}>
+                                {saldoFinal < 0 ? '-' : ''}R$ {formatCurrency(Math.abs(saldoFinal))}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="text-xs text-blue-300 mt-2 opacity-75">
+                            💡 Baseado em transações realizadas (s) + previstas (p)
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()
+                )}
               </div>
             )}
-            
+
             <div className="flex gap-3">
               <button
                 onClick={onClose}

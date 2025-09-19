@@ -118,7 +118,7 @@ export function ContasTab({ transactions }: ContasTabProps) {
     },
     {
       nome: 'Invest. Sttd Kel',
-      codigo: 'Investimento Sttd Kel',
+      codigo: 'Investimento Keka',
       icone: '💰',
       cor: 'from-red-700 to-red-800',
       corTexto: 'text-red-100'
@@ -210,12 +210,12 @@ export function ContasTab({ transactions }: ContasTabProps) {
                     <div className="flex flex-col items-end gap-1">
                       {/* Saldo Real (s+p) - Principal */}
                       <div className={`${banco.corTexto} font-bold text-base md:text-lg min-w-[80px] md:min-w-[100px]`}>
-                        R$ {formatCurrency(Math.abs(banco.saldo))}
+                        {banco.saldo < 0 ? '-' : ''}R$ {formatCurrency(Math.abs(banco.saldo))}
                       </div>
-                      
+
                       {/* Saldo Classificado (s) - Menor */}
                       <div className={`${banco.corTexto} text-xs opacity-75`}>
-                        Classif.: R$ {formatCurrency(Math.abs(banco.saldoRealizado))}
+                        Classif.: {banco.saldoRealizado < 0 ? '-' : ''}R$ {formatCurrency(Math.abs(banco.saldoRealizado))}
                       </div>
                     </div>
                   </div>

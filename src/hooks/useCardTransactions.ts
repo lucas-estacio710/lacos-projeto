@@ -483,14 +483,13 @@ export function useCardTransactions() {
 
       console.log('✅ Transação original deletada');
 
-      // ETAPA 2: Criar novas transações divididas
+      // ETAPA 2: Criar novas transações divididas (UUID será gerado automaticamente)
       const newCardTransactions = parts.map((part, index) => ({
-        id: `${originalTransaction.id}-${index + 1}`,
         user_id: user.id,
-        fingerprint: `${originalTransaction.fingerprint || originalTransaction.id}-${index + 1}`,
+        fingerprint: `${originalTransaction.fingerprint || originalTransaction.id}-split-${index + 1}`,
         fatura_id: originalTransaction.fatura_id,
         data_transacao: originalTransaction.data_transacao,
-        descricao_origem: originalTransaction.descricao_origem,
+        descricao_origem: `${originalTransaction.descricao_origem} (parte ${index + 1}/${parts.length})`,
         valor: part.valor,
         subtipo_id: part.subtipo_id,
         descricao_classificada: part.descricao_classificada,
@@ -512,11 +511,12 @@ export function useCardTransactions() {
 
       console.log('✅ Novas transações de cartão criadas:', insertedTransactions?.length);
 
-      // ETAPA 3: Atualizar estado local
+      // ETAPA 3: Atualizar estado local com transações inseridas
       setCardTransactions(prev => {
         const withoutOriginal = prev.filter(t => t.id !== originalTransaction.id);
-        
-        const newTransactionObjects: CardTransaction[] = newCardTransactions.map(nt => ({
+
+        // Usar as transações retornadas pelo Supabase (com IDs gerados)
+        const newTransactionObjects: CardTransaction[] = (insertedTransactions || []).map(nt => ({
           id: nt.id,
           fingerprint: nt.fingerprint,
           fatura_id: nt.fatura_id,
@@ -531,7 +531,7 @@ export function useCardTransactions() {
           created_at: nt.created_at,
           updated_at: nt.updated_at
         }));
-        
+
         return [...withoutOriginal, ...newTransactionObjects];
       });
 

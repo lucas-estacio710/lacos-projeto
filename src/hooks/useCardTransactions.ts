@@ -455,10 +455,9 @@ export function useCardTransactions() {
 
   // ===== NOVA FUNÇÃO: Dividir transação de cartão =====
   const splitCardTransaction = async (
-    originalTransaction: CardTransaction, 
+    originalTransaction: CardTransaction,
     parts: Array<{
-      categoria: string;
-      subtipo: string;
+      subtipo_id: string;
       descricao_classificada: string;
       valor: number;
     }>
@@ -493,8 +492,7 @@ export function useCardTransactions() {
         data_transacao: originalTransaction.data_transacao,
         descricao_origem: originalTransaction.descricao_origem,
         valor: part.valor,
-        categoria: part.categoria,
-        subtipo: part.subtipo,
+        subtipo_id: part.subtipo_id,
         descricao_classificada: part.descricao_classificada,
         status: 'classified' as const,
         origem: originalTransaction.origem,
@@ -525,8 +523,7 @@ export function useCardTransactions() {
           data_transacao: nt.data_transacao,
           descricao_origem: nt.descricao_origem,
           valor: nt.valor,
-          categoria: nt.categoria,
-          subtipo: nt.subtipo,
+          subtipo_id: nt.subtipo_id,
           descricao_classificada: nt.descricao_classificada,
           status: nt.status,
           origem: nt.origem,

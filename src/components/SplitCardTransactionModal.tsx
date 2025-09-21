@@ -4,11 +4,13 @@ import React, { useState, useEffect } from 'react';
 import { CardTransaction } from '@/hooks/useCardTransactions';
 import { useHierarchy } from '@/hooks/useHierarchy';
 import { prepareClassificationOptions } from '@/lib/hierarchyHelpers';
+import { Search } from 'lucide-react';
 
 interface SplitCardPart {
   subtipo_id: string;
   descricao_classificada: string;
   valor: number;
+  searchTerm: string; // ✅ NOVO CAMPO para busca
 }
 
 interface SplitCardTransactionModalProps {
@@ -18,16 +20,17 @@ interface SplitCardTransactionModalProps {
   onSplit: (parts: SplitCardPart[]) => void;
 }
 
-export function SplitCardTransactionModal({ 
-  transaction, 
-  isOpen, 
-  onClose, 
-  onSplit 
+export function SplitCardTransactionModal({
+  transaction,
+  isOpen,
+  onClose,
+  onSplit
 }: SplitCardTransactionModalProps) {
-  const { visaoPlana } = useHierarchy();
+  const { visaoPlana, contas, categorias, subtipos } = useHierarchy();
   const [numberOfParts, setNumberOfParts] = useState(2);
   const [parts, setParts] = useState<SplitCardPart[]>([]);
   const [error, setError] = useState<string>('');
+  const [activeSearchIndex, setActiveSearchIndex] = useState<number | null>(null); // ✅ NOVO: índice da busca ativa
 
   // Prepara opções de classificação
   const classificationOptions = visaoPlana ? prepareClassificationOptions(visaoPlana) : [];
@@ -38,12 +41,28 @@ export function SplitCardTransactionModal({
       const initialParts: SplitCardPart[] = Array.from({ length: numberOfParts }, () => ({
         subtipo_id: '',
         descricao_classificada: '',
-        valor: 0
+        valor: 0,
+        searchTerm: '' // ✅ NOVO CAMPO
       }));
       setParts(initialParts);
       setError('');
     }
   }, [transaction, isOpen, numberOfParts]);
+
+  // ✅ NOVO: Fechar dropdown quando clicar fora
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest('.search-dropdown')) {
+        setActiveSearchIndex(null);
+      }
+    };
+
+    if (activeSearchIndex !== null) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [activeSearchIndex]);
 
 
 
@@ -71,14 +90,14 @@ export function SplitCardTransactionModal({
 
   const handlePartChange = (index: number, field: keyof SplitCardPart, value: string | number) => {
     const newParts = [...parts];
-    
+
     if (field === 'valor') {
       newParts[index][field] = Number(value);
-      
+
       // Calcular valor restante automaticamente para a última parte não preenchida
       const filledValues = newParts.slice(0, -1).reduce((sum, part) => sum + part.valor, 0);
       const remaining = Math.abs(transaction?.valor || 0) - Math.abs(filledValues);
-      
+
       // Se não é a última parte e ainda há valor restante
       if (index < parts.length - 1) {
         const lastIndex = parts.length - 1;
@@ -87,18 +106,36 @@ export function SplitCardTransactionModal({
     } else {
       newParts[index][field] = value as string;
     }
-    
+
     setParts(newParts);
-    
+
     // Validar soma dos valores
     const total = newParts.reduce((sum, part) => sum + part.valor, 0);
     const originalValue = transaction?.valor || 0;
-    
+
     if (Math.abs(Math.abs(total) - Math.abs(originalValue)) > 0.01) {
       setError(`Soma dos valores (${formatCurrency(total)}) deve ser igual ao valor original (${formatCurrency(Math.abs(originalValue))})`);
     } else {
       setError('');
     }
+  };
+
+  // ✅ NOVA FUNÇÃO: Selecionar subtipo da busca
+  const selectSubtipo = (index: number, subtipoNome: string, subtipoId: string) => {
+    const newParts = [...parts];
+    newParts[index].searchTerm = subtipoNome;
+    newParts[index].subtipo_id = subtipoId;
+    setParts(newParts);
+    setActiveSearchIndex(null); // Fechar dropdown
+  };
+
+  // ✅ NOVA FUNÇÃO: Filtrar subtipos por busca
+  const getFilteredSubtipos = (searchTerm: string) => {
+    if (!searchTerm || searchTerm.length === 0) return [];
+
+    return subtipos
+      .filter(s => s.nome.toLowerCase().includes(searchTerm.toLowerCase()))
+      .slice(0, 8);
   };
 
   const handleSplit = () => {
@@ -194,21 +231,58 @@ export function SplitCardTransactionModal({
                 </h4>
                 
                 <div className="space-y-3">
-                  {/* Classificação */}
-                  <div>
+                  {/* Classificação com busca */}
+                  <div className="relative search-dropdown">
                     <label className="text-xs text-gray-400 block mb-1">Classificação *</label>
-                    <select
-                      value={part.subtipo_id}
-                      onChange={(e) => handlePartChange(index, 'subtipo_id', e.target.value)}
-                      className="w-full p-2 bg-gray-600 border border-gray-500 rounded text-gray-100 text-sm"
-                    >
-                      <option value="">Selecione...</option>
-                      {classificationOptions.map(option => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="relative">
+                      <Search className="absolute left-2 top-2.5 w-3 h-3 text-gray-400" />
+                      <input
+                        type="text"
+                        placeholder="Digite para buscar subtipo..."
+                        value={part.searchTerm}
+                        onChange={(e) => {
+                          handlePartChange(index, 'searchTerm', e.target.value);
+                          setActiveSearchIndex(index);
+                        }}
+                        onFocus={() => setActiveSearchIndex(index)}
+                        className="w-full pl-7 pr-4 py-2 bg-gray-600 border border-gray-500 rounded text-gray-100 text-sm placeholder-gray-400 focus:border-blue-500 focus:outline-none"
+                      />
+                    </div>
+
+                    {/* Dropdown de sugestões */}
+                    {activeSearchIndex === index && part.searchTerm && part.searchTerm.length > 0 && (
+                      <div className="absolute z-10 w-full mt-1 max-h-40 overflow-y-auto bg-gray-600 border border-gray-500 rounded shadow-lg">
+                        {(() => {
+                          const filteredSubtipos = getFilteredSubtipos(part.searchTerm);
+
+                          if (filteredSubtipos.length === 0) {
+                            return (
+                              <div className="p-2 text-xs text-gray-400">
+                                Nenhum subtipo encontrado
+                              </div>
+                            );
+                          }
+
+                          return filteredSubtipos.map(subtipo => {
+                            const categoria = categorias.find(c => c.id === subtipo.categoria_id);
+                            const conta = contas.find(c => c.id === categoria?.conta_id);
+
+                            return (
+                              <button
+                                key={subtipo.id}
+                                onClick={() => selectSubtipo(index, subtipo.nome, subtipo.id)}
+                                className="w-full text-left p-2 hover:bg-gray-500 transition-colors border-b border-gray-500 last:border-b-0"
+                              >
+                                <div className="text-xs text-gray-200 font-medium">{subtipo.nome}</div>
+                                <div className="text-xs text-gray-400">
+                                  {conta?.nome} → {categoria?.nome}
+                                </div>
+                              </button>
+                            );
+                          });
+                        })()}
+                      </div>
+                    )}
                   </div>
 
                   {/* Descrição */}

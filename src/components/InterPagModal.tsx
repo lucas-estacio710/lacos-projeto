@@ -247,7 +247,9 @@ export const InterPagModal: React.FC<InterPagModalProps> = ({
         
         // ⭐ SEPARAR VALORES POSITIVOS E NEGATIVOS
         // Detectar custos operacionais pelo tipo (ex: "116 - DÉBITO REFERENTE A PAGAMENTO DE MÁQUINAS")
-        const isCustoOperacional = agendaEntry.tipo?.includes('116') ||
+        // IMPORTANTE: Apenas detectar quando tem "116" no início ou "referente a pagamento"
+        // NÃO detectar pagamentos normais como "Débito" ou "Débito P1/1"
+        const isCustoOperacional = agendaEntry.tipo?.trim().startsWith('116') ||
                                     agendaEntry.tipo?.toLowerCase().includes('referente a pagamento') ||
                                     agendaEntry.tipo?.toLowerCase().includes('pagamento de máquina');
 

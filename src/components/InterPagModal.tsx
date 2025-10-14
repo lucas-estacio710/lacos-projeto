@@ -256,13 +256,11 @@ export const InterPagModal: React.FC<InterPagModalProps> = ({
         if (agendaEntry.valor_liquido < 0 || isCustoOperacional) {
           // VALOR NEGATIVO OU CUSTO OPERACIONAL: Adicionar à agenda negativa
           group.agendaNegativa.push(agendaEntry);
-          group.totalNegativeValue += Math.abs(agendaEntry.valor_liquido); // Valor absoluto para total
-
-          console.log(`⚠️ Custo operacional detectado: R$ ${agendaEntry.valor_liquido} - Tipo: ${agendaEntry.tipo} - ID: ${agendaEntry.id_transacao}`);
+          group.totalNegativeValue += Math.abs(agendaEntry.valor_liquido);
 
         } else {
           // VALOR POSITIVO: Processar normalmente com quebra por percentuais
-          
+
           // Buscar percentual correspondente
           const percentualMatch = currentPercentuaisEntries.find(p =>
             p.id_transacao === agendaEntry.id_transacao
@@ -277,25 +275,8 @@ export const InterPagModal: React.FC<InterPagModalProps> = ({
           const catalogoPercent = percentualMatch?.percentual_catalogo || 0;
           const planosPercent = percentualMatch?.percentual_planos || 0;
 
-          console.log(`🔍 DEBUG DÉBITO - ID: ${agendaEntry.id_transacao}`, {
-            tipo: agendaEntry.tipo,
-            isDebito,
-            valor_liquido: agendaEntry.valor_liquido,
-            catalogoPercent,
-            planosPercent,
-            percentualMatch: percentualMatch ? 'ENCONTRADO' : 'NÃO ENCONTRADO'
-          });
-
           const catalogoValue = Math.round((agendaEntry.valor_liquido * catalogoPercent / 100) * 100) / 100;
           const planosValue = Math.round((agendaEntry.valor_liquido * planosPercent / 100) * 100) / 100;
-
-          console.log(`🔍 DEBUG CÁLCULO - ID: ${agendaEntry.id_transacao}`, {
-            catalogoValue,
-            planosValue,
-            soma: catalogoValue + planosValue,
-            esperado: agendaEntry.valor_liquido,
-            diferenca: (catalogoValue + planosValue) - agendaEntry.valor_liquido
-          });
           
           // Determinar tipo (Individual/Coletivo) baseado no contrato
           const contrato = percentualMatch?.id_contrato || '';
@@ -365,26 +346,28 @@ export const InterPagModal: React.FC<InterPagModalProps> = ({
   // FUNÇÃO PARA REFRESH MANUAL DOS DADOS
   const handleRefreshData = useCallback(async () => {
     if (isRefreshing) return; // Evitar múltiplos refreshes simultâneos
-    
+
     setIsRefreshing(true);
-    // 🔄 Iniciando refresh manual
-    
+
     try {
-      // Forçar reinicialização dos dados
+      // ⭐ CHAMAR CALLBACK onSuccess PARA RECARREGAR DADOS DO SUPABASE
+      if (onSuccess) {
+        await onSuccess();
+      }
+
+      // Forçar reinicialização dos dados locais do modal
       setDataInitialized(false);
       setDayGroups([]);
-      
+
       // Pequeno delay para UI feedback
       await new Promise(resolve => setTimeout(resolve, 100));
-      
-      // 🔄 Forçando reprocessamento
-      
+
     } catch (error) {
       console.error('⌀ Erro no refresh manual:', error);
     } finally {
       setIsRefreshing(false);
     }
-  }, [isRefreshing]);
+  }, [isRefreshing, onSuccess]);
 
   // DETECTAR QUANDO PRECISA REPROCESSAR
   useEffect(() => {
@@ -413,8 +396,6 @@ export const InterPagModal: React.FC<InterPagModalProps> = ({
     
     setSelectedTransactions(allTransactionIds);
     setSelectedAgenda(allAgendaIds);
-    
-    console.log(`✅ Selecionadas todas: ${allTransactionIds.size} transações + ${allAgendaIds.size} agendas do dia ${currentGroup.displayDate}`);
   }, [getCurrentGroup]);
 
   const goToPreviousDay = useCallback(() => {
@@ -621,8 +602,6 @@ export const InterPagModal: React.FC<InterPagModalProps> = ({
 
       // ⭐ PROCESSAR VALORES NEGATIVOS COMO CUSTOS OPERACIONAIS
       if (currentGroup.agendaNegativa.length > 0) {
-        console.log(`🏷️ Processando ${currentGroup.agendaNegativa.length} valores negativos como custos operacionais...`);
-        
         currentGroup.agendaNegativa.forEach((agendaNegativa, negIndex) => {
           const baseTransaction = selectedTransactionsList[0];
           const valorAbsoluto = Math.abs(agendaNegativa.valor_liquido);
@@ -680,8 +659,6 @@ export const InterPagModal: React.FC<InterPagModalProps> = ({
 
       // ⭐ MARCAR ENTRADAS DA AGENDA COMO UTILIZADAS (POSITIVAS E NEGATIVAS)
       try {
-        console.log('🏷️ Marcando entradas da agenda como utilizadas...');
-        
         // IDs das agendas positivas (selecionadas)
         const agendaIds = selectedAgendaList.map(a => a.agenda.id_transacao);
         
@@ -699,8 +676,6 @@ export const InterPagModal: React.FC<InterPagModalProps> = ({
           
           if (updateError) {
             console.error('⚠️ Erro ao marcar agenda como utilizada:', updateError);
-          } else {
-            console.log(`✅ ${agendaIds.length} positivas + ${agendaNegativaIds.length} negativas = ${allAgendaIds.length} entradas marcadas como utilizadas`);
           }
         }
       } catch (markError) {

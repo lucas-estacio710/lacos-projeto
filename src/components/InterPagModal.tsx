@@ -246,38 +246,62 @@ export const InterPagModal: React.FC<InterPagModalProps> = ({
         const group = groups.get(dateStr)!;
         
         // ⭐ SEPARAR VALORES POSITIVOS E NEGATIVOS
-        if (agendaEntry.valor_liquido < 0) {
-          // VALOR NEGATIVO: Adicionar à agenda negativa (custos operacionais)
+        // Detectar custos operacionais pelo tipo (ex: "116 - DÉBITO REFERENTE A PAGAMENTO DE MÁQUINAS")
+        const isCustoOperacional = agendaEntry.tipo?.includes('116') ||
+                                    agendaEntry.tipo?.toLowerCase().includes('referente a pagamento') ||
+                                    agendaEntry.tipo?.toLowerCase().includes('pagamento de máquina');
+
+        if (agendaEntry.valor_liquido < 0 || isCustoOperacional) {
+          // VALOR NEGATIVO OU CUSTO OPERACIONAL: Adicionar à agenda negativa
           group.agendaNegativa.push(agendaEntry);
           group.totalNegativeValue += Math.abs(agendaEntry.valor_liquido); // Valor absoluto para total
-          
-          console.log(`⚠️ Valor negativo detectado: R$ ${agendaEntry.valor_liquido} - ID: ${agendaEntry.id_transacao}`);
-          
+
+          console.log(`⚠️ Custo operacional detectado: R$ ${agendaEntry.valor_liquido} - Tipo: ${agendaEntry.tipo} - ID: ${agendaEntry.id_transacao}`);
+
         } else {
           // VALOR POSITIVO: Processar normalmente com quebra por percentuais
           
           // Buscar percentual correspondente
-          const percentualMatch = currentPercentuaisEntries.find(p => 
+          const percentualMatch = currentPercentuaisEntries.find(p =>
             p.id_transacao === agendaEntry.id_transacao
           );
-          
+
+          // ⭐ DETECTAR SE É DÉBITO OU CRÉDITO (PARCELA) - PRECISA VIR ANTES
+          const isDebito = agendaEntry.tipo?.toLowerCase().includes('débito') ||
+                          agendaEntry.tipo?.toLowerCase().includes('debito') ||
+                          agendaEntry.tipo?.toLowerCase() === 'débito';
+
           // Calcular preview da quebra
           const catalogoPercent = percentualMatch?.percentual_catalogo || 0;
           const planosPercent = percentualMatch?.percentual_planos || 0;
+
+          console.log(`🔍 DEBUG DÉBITO - ID: ${agendaEntry.id_transacao}`, {
+            tipo: agendaEntry.tipo,
+            isDebito,
+            valor_liquido: agendaEntry.valor_liquido,
+            catalogoPercent,
+            planosPercent,
+            percentualMatch: percentualMatch ? 'ENCONTRADO' : 'NÃO ENCONTRADO'
+          });
+
           const catalogoValue = Math.round((agendaEntry.valor_liquido * catalogoPercent / 100) * 100) / 100;
           const planosValue = Math.round((agendaEntry.valor_liquido * planosPercent / 100) * 100) / 100;
+
+          console.log(`🔍 DEBUG CÁLCULO - ID: ${agendaEntry.id_transacao}`, {
+            catalogoValue,
+            planosValue,
+            soma: catalogoValue + planosValue,
+            esperado: agendaEntry.valor_liquido,
+            diferenca: (catalogoValue + planosValue) - agendaEntry.valor_liquido
+          });
           
           // Determinar tipo (Individual/Coletivo) baseado no contrato
           const contrato = percentualMatch?.id_contrato || '';
           const isIndividual = contrato.includes('IND');
           const isColetivo = contrato.includes('COL');
           const tipoSuffix = isIndividual ? 'IND.' : isColetivo ? 'COL.' : 'IND.';
-          
-          // ⭐ DETECTAR SE É DÉBITO OU CRÉDITO (PARCELA)
-          const isDebito = agendaEntry.tipo?.toLowerCase().includes('débito') || 
-                          agendaEntry.tipo?.toLowerCase().includes('debito') ||
-                          agendaEntry.tipo?.toLowerCase() === 'débito';
-          
+
+          // isDebito já foi detectado nas linhas 265-267
           const receitaTipo = isDebito ? 'N.' : 'A.'; // Nova ou Antiga
           const parcelaDesc = isDebito ? '' : ` - Parcela ${agendaEntry.parcela}`;
           
@@ -455,12 +479,16 @@ export const InterPagModal: React.FC<InterPagModalProps> = ({
   const selectedNewTransactionsTotal = useMemo(() => {
     // Somar receitas dos lançamentos positivos
     const receitasTotal = selectedAgendaList.reduce((sum: number, a: AgendaEnriquecida) => sum + a.previewQuebra.catalogoValue + a.previewQuebra.planosValue, 0);
-    
-    // ⭐ SOMAR CUSTOS DOS LANÇAMENTOS NEGATIVOS (quando houver transações selecionadas)
-    const custosTotal = selectedTransactions.size > 0 && currentGroup ? currentGroup.totalNegativeValue : 0;
-    
+
+    // ⭐ SOMAR CUSTOS DOS LANÇAMENTOS NEGATIVOS apenas quando TODAS as transações E TODAS as agendas do dia forem selecionadas
+    const allTransactionsSelected = currentGroup && selectedTransactions.size === currentGroup.interPagTransactions.length;
+    const allAgendasSelected = currentGroup && selectedAgenda.size === currentGroup.agendaEnriquecida.length;
+    const shouldIncludeNegatives = allTransactionsSelected && allAgendasSelected;
+
+    const custosTotal = shouldIncludeNegatives && currentGroup ? currentGroup.totalNegativeValue : 0;
+
     return receitasTotal - custosTotal; // Receitas - Custos = Total líquido
-  }, [selectedAgendaList, selectedTransactions.size, currentGroup]);
+  }, [selectedAgendaList, selectedTransactions, selectedAgenda, currentGroup]);
 
   const hasSelections = selectedTransactions.size > 0 && selectedAgenda.size > 0;
   const difference = selectedTransactionTotal - selectedNewTransactionsTotal;

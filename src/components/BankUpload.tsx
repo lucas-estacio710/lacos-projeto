@@ -6,6 +6,7 @@ import { Transaction, BankType } from '@/types';
 import { CardTransaction } from '@/hooks/useCardTransactions';
 import { formatMonth, formatCurrency } from '@/lib/utils';
 import * as XLSX from 'xlsx';
+import { TonUploadReview } from './TonUploadReview';
 
 interface BankUploadProps {
   isOpen: boolean;
@@ -28,6 +29,10 @@ export function BankUpload({
   const [inputMethod, setInputMethod] = useState<'file' | 'paste'>('paste'); // ✅ PADRÃO: Colar dados
   const [pastedData, setPastedData] = useState(''); // ✅ NOVO: Dados colados
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ✅ NOVO: Estados para modal de revisão TON
+  const [showTonReview, setShowTonReview] = useState(false);
+  const [tonPendingTransactions, setTonPendingTransactions] = useState<Transaction[]>([]);
 
   // ✅ FUNÇÃO: Detectar se primeira linha é cabeçalho do BB
   const detectBBHeader = (lines: string[]): boolean => {
@@ -703,6 +708,36 @@ export function BankUpload({
     }
   };
 
+  // ✅ NOVA FUNÇÃO: Confirmar importação das transações TON selecionadas
+  const handleTonConfirm = async (selectedTransactions: Transaction[]) => {
+    try {
+      const result = await onTransactionsImported(selectedTransactions);
+
+      let message = '';
+      if (result?.success && result?.stats) {
+        const { total = 0, added = 0, duplicates = 0 } = result.stats;
+
+        message = `✅ Importação TON concluída!\n\n`;
+        message += `📊 ${total} transações processadas\n`;
+        message += `➕ ${added} novas transações adicionadas\n`;
+
+        if (duplicates > 0) {
+          message += `🔄 ${duplicates} duplicatas ignoradas\n`;
+        }
+      } else {
+        message = `✅ ${selectedTransactions.length} transações importadas!`;
+      }
+
+      alert(message);
+      setShowTonReview(false);
+      setTonPendingTransactions([]);
+      onClose();
+    } catch (error) {
+      console.error('Erro ao importar transações TON:', error);
+      alert('❌ Erro ao importar transações TON. Tente novamente.');
+    }
+  };
+
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -1052,25 +1087,11 @@ export function BankUpload({
 
         console.log(`🎯 TON - ${importedTransactions.length} transações processadas`);
 
-        const result = await onTransactionsImported(importedTransactions);
-
-        let message = '';
-        if (result?.success && result?.stats) {
-          const { total = 0, added = 0, duplicates = 0 } = result.stats;
-
-          message = `✅ Importação TON concluída!\n\n`;
-          message += `📊 ${total} transações processadas\n`;
-          message += `➕ ${added} novas transações adicionadas\n`;
-
-          if (duplicates > 0) {
-            message += `🔄 ${duplicates} duplicatas ignoradas\n`;
-          }
-        } else {
-          message = `✅ ${importedTransactions.length} transações processadas!`;
-        }
-
-        alert(message);
-        onClose();
+        // ✅ ABRIR MODAL DE REVISÃO ao invés de importar direto
+        setTonPendingTransactions(importedTransactions);
+        setShowTonReview(true);
+        setIsProcessing(false);
+        return;
       }
 
     } catch (error) {
@@ -1350,6 +1371,20 @@ export function BankUpload({
           </div>
         </div>
       </div>
+
+      {/* ✅ MODAL DE REVISÃO TON */}
+      {showTonReview && (
+        <TonUploadReview
+          isOpen={showTonReview}
+          onClose={() => {
+            setShowTonReview(false);
+            setTonPendingTransactions([]);
+          }}
+          transactions={tonPendingTransactions}
+          onConfirm={handleTonConfirm}
+          currentBalance={getSaldoAtualBanco('Stone')}
+        />
+      )}
     </div>
   );
 }

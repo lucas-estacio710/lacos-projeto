@@ -721,14 +721,18 @@ export default function DashboardPage() {
               </div>
             </div>
             
-            {/* Online Status */}
-            <div className="flex items-center justify-center">
+            {/* Online Status + Version */}
+            <div className="flex items-center justify-center gap-3">
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
                 <span className="text-xs font-mono text-green-400 tracking-wide">
                   ONLINE
                 </span>
               </div>
+              <span className="text-gray-600">|</span>
+              <span className="text-xs font-mono text-gray-500">
+                v3.8.1
+              </span>
             </div>
           </div>
         </div>

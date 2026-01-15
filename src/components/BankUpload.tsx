@@ -98,12 +98,128 @@ export function BankUpload({
       'Inter': 'Inter',
       'BB': 'BB',
       'Santander': 'Santander',
+      'Santander Keka': 'Santander Keka',
       'TON': 'Stone',
       'Nubank': 'MasterCard', // Cartões usam códigos diferentes
       'VISA': 'VISA',
       'MasterCard': 'MasterCard'
     };
     return bankMapping[selectedBank] || selectedBank;
+  };
+
+  // ✅ Mapeamento de nomes de mês em português para número
+  const mesMap: Record<string, string> = {
+    'Janeiro': '01',
+    'Fevereiro': '02',
+    'Março': '03',
+    'Abril': '04',
+    'Maio': '05',
+    'Junho': '06',
+    'Julho': '07',
+    'Agosto': '08',
+    'Setembro': '09',
+    'Outubro': '10',
+    'Novembro': '11',
+    'Dezembro': '12'
+  };
+
+  // ✅ FUNÇÃO: Processar extrato do Santander Keka (Excel)
+  const processSantanderKekaExcel = async (workbook: XLSX.WorkBook): Promise<Transaction[]> => {
+    const transactions: Transaction[] = [];
+    const usedIds = new Set<string>();
+
+    // Buscar aba "Movimentações"
+    const ws = workbook.Sheets['Movimentações'];
+    if (!ws) {
+      throw new Error('Aba "Movimentações" não encontrada na planilha');
+    }
+
+    const rows = XLSX.utils.sheet_to_json(ws) as Array<{
+      'Mês': string;
+      'Data': string;
+      'Descrição': string;
+      'Documento'?: string;
+      'Valor': number;
+      'Saldo': number;
+    }>;
+
+    console.log(`📊 Santander Keka - ${rows.length} linhas encontradas`);
+
+    // Adicionar saldo inicial para bater o saldo
+    transactions.push({
+      id: 'SANT_KEKA_20241201_SALDO_INICIAL_11801_0',
+      mes: '2412',
+      data: '2024-12-01',
+      descricao_origem: 'SALDO INICIAL - AJUSTE',
+      descricao: 'SALDO INICIAL - AJUSTE',
+      valor: 118.01,
+      origem: 'Santander Keka',
+      cc: 'Santander Keka',
+      realizado: 's',
+      subtipo_id: null
+    });
+    usedIds.add('SANT_KEKA_20241201_SALDO_INICIAL_11801_0');
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+
+      if (!row['Mês'] || !row['Data'] || row['Valor'] === undefined) {
+        console.log(`⚠️ Linha ${i + 2} ignorada: dados incompletos`);
+        continue;
+      }
+
+      try {
+        // Parsear mês: "Dezembro 2024" -> ano e mês
+        const [mesNome, ano] = row['Mês'].split(' ');
+        const mesNum = mesMap[mesNome];
+        if (!mesNum || !ano) {
+          console.log(`⚠️ Linha ${i + 2} ignorada: formato de mês inválido "${row['Mês']}"`);
+          continue;
+        }
+
+        // Parsear data: "31/12" -> DD/MM
+        const [dia, mes] = row['Data'].split('/');
+        if (!dia || !mes) {
+          console.log(`⚠️ Linha ${i + 2} ignorada: formato de data inválido "${row['Data']}"`);
+          continue;
+        }
+
+        // Formato ISO: YYYY-MM-DD
+        const dataISO = `${ano}-${mes.padStart(2, '0')}-${dia.padStart(2, '0')}`;
+
+        // Formato mês: AAMM
+        const mesAAMM = `${ano.slice(-2)}${mes.padStart(2, '0')}`;
+
+        // Gerar ID único
+        const cleanDesc = row['Descrição'].replace(/[^a-zA-Z0-9]/g, '').substring(0, 20);
+        const valorStr = Math.abs(row['Valor']).toString().replace('.', '');
+        const id = `SANT_KEKA_${dataISO.replace(/-/g, '')}_${cleanDesc}_${valorStr}_${i}`;
+
+        if (usedIds.has(id)) {
+          console.log(`⚠️ ID duplicado: ${id}`);
+          continue;
+        }
+        usedIds.add(id);
+
+        transactions.push({
+          id,
+          mes: mesAAMM,
+          data: dataISO,
+          descricao_origem: row['Descrição'],
+          descricao: row['Descrição'],
+          valor: row['Valor'],
+          origem: 'Santander Keka',
+          cc: 'Santander Keka',
+          realizado: 'p',
+          subtipo_id: null
+        });
+      } catch (err) {
+        console.error(`❌ Erro na linha ${i + 2}:`, err);
+      }
+    }
+
+    console.log(`✅ Santander Keka - ${transactions.length} transações processadas`);
+    return transactions;
   };
 
   // Parse de valor brasileiro
@@ -1092,6 +1208,46 @@ export function BankUpload({
         setShowTonReview(true);
         setIsProcessing(false);
         return;
+
+      } else if (selectedBank === 'Santander Keka') {
+        // ===== PROCESSAR SANTANDER KEKA (EXCEL) =====
+        try {
+          // Ler arquivo Excel
+          const arrayBuffer = await file.arrayBuffer();
+          const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+
+          const importedTransactions = await processSantanderKekaExcel(workbook);
+
+          if (importedTransactions.length === 0) {
+            alert(`⚠️ Nenhuma transação válida encontrada no arquivo Excel do Santander Keka`);
+            return;
+          }
+
+          console.log(`🎯 Santander Keka - ${importedTransactions.length} transações processadas`);
+
+          // Enviar para o hook de transações
+          const result = await onTransactionsImported(importedTransactions);
+
+          let message = `✅ Importação Santander Keka concluída!\n\n`;
+          message += `📊 ${importedTransactions.length} transações processadas\n`;
+          message += `📍 Todas as transações foram marcadas como pendentes\n`;
+          message += `📥 Vá para a InboxTab para classificá-las\n`;
+
+          if (result && typeof result === 'object' && 'stats' in result) {
+            const stats = result.stats!;
+            message += `\n📈 Estatísticas:\n`;
+            message += `• Total processadas: ${stats.total}\n`;
+            message += `• Novas adicionadas: ${stats.added}\n`;
+            message += `• Duplicatas ignoradas: ${stats.duplicates}`;
+          }
+
+          alert(message);
+          onClose();
+
+        } catch (excelError) {
+          console.error('Erro ao processar Excel Santander Keka:', excelError);
+          throw new Error(`Erro ao ler arquivo Excel: ${(excelError as Error).message}`);
+        }
       }
 
     } catch (error) {
@@ -1137,6 +1293,7 @@ export function BankUpload({
                 <option value="Inter">🟠 Inter (Extrato)</option>
                 <option value="BB">🟡 Banco do Brasil (Extrato)</option>
                 <option value="TON">🟢 Ton (Extrato)</option>
+                <option value="Santander Keka">🔴 Santander Keka (Extrato Excel)</option>
                 <option value="Nubank">🟣 Nubank (Fatura Cartão)</option>
                 <option value="VISA">🔵 VISA (Fatura Cartão)</option>
                 <option value="MasterCard">🔴 MasterCard (Fatura Cartão)</option>
@@ -1223,7 +1380,7 @@ export function BankUpload({
                       <>
                         <Upload className="w-8 h-8 mx-auto mb-2 text-blue-400" />
                         <p className="text-blue-100 font-medium">
-                          Selecionar Arquivo {selectedBank === 'TON' ? 'Excel' : 'CSV'}
+                          Selecionar Arquivo {(selectedBank === 'TON' || selectedBank === 'Santander Keka') ? 'Excel' : 'CSV'}
                         </p>
                         <p className="text-blue-300 text-sm mt-1">
                           {isCardTransaction ? `Fatura do ${selectedBank}` : `Extrato do ${selectedBank}`}
@@ -1236,7 +1393,7 @@ export function BankUpload({
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept={selectedBank === 'TON' ? '.xlsx,.xls' : '.csv'}
+                  accept={(selectedBank === 'TON' || selectedBank === 'Santander Keka') ? '.xlsx,.xls' : '.csv'}
                   onChange={handleFileUpload}
                   className="hidden"
                   disabled={isProcessing}

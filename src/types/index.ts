@@ -104,14 +104,15 @@ export interface InterPagSplitResult {
   reconciliationNote: string;
 }
 
-// ✅ TIPO ATUALIZADO COM VISA E MASTERCARD
+// ✅ TIPO ATUALIZADO COM VISA, MASTERCARD E SANTANDER KEKA
 export type BankType =
   | 'Inter'
   | 'BB'
   | 'TON'
-  | 'Nubank' 
-  | 'VISA' 
-  | 'MasterCard';
+  | 'Nubank'
+  | 'VISA'
+  | 'MasterCard'
+  | 'Santander Keka';
 
 export interface CategoryData {
   subtipos: string[];

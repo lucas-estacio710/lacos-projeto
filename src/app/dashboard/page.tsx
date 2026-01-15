@@ -731,7 +731,7 @@ export default function DashboardPage() {
               </div>
               <span className="text-gray-600">|</span>
               <span className="text-xs font-mono text-gray-500">
-                v3.8.1
+                v3.8.2
               </span>
             </div>
           </div>

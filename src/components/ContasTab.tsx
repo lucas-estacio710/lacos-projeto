@@ -94,6 +94,13 @@ export function ContasTab({ transactions }: ContasTabProps) {
       corTexto: 'text-red-100'
     },
     {
+      nome: 'Santander Keka',
+      codigo: 'Santander Keka',
+      icone: '🔴',
+      cor: 'from-red-600 to-red-700',
+      corTexto: 'text-red-100'
+    },
+    {
       nome: 'Banco do Brasil',
       codigo: 'BB',
       icone: '🟡',

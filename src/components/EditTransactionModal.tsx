@@ -478,7 +478,7 @@ export function EditCardTransactionModal({
 }: EditCardTransactionModalProps) {
   const { contas, categorias, subtipos, carregarTudo } = useHierarchy();
   const [isProcessing, setIsProcessing] = useState(false);
-  
+
   // Load hierarchy data when modal opens
   useEffect(() => {
     if (isOpen) {
@@ -496,6 +496,52 @@ export function EditCardTransactionModal({
     subtipo: '',
     descricao_classificada: ''
   });
+
+  // Estado para busca de subtipo
+  const [searchSubtipo, setSearchSubtipo] = useState('');
+
+  // Buscar subtipos por nome (todos os subtipos ativos)
+  const allSubtipos = useMemo(() => {
+    return subtipos
+      .filter(s => s.ativo && !isClassificacaoComplexa(s.id))
+      .map(s => {
+        const categoria = categorias.find(c => c.id === s.categoria_id);
+        const conta = categoria ? contas.find(c => c.id === categoria.conta_id) : null;
+        return {
+          id: s.id,
+          nome: s.nome,
+          categoria_nome: categoria?.nome || '',
+          conta_codigo: conta?.codigo || '',
+          conta_nome: conta?.nome || '',
+          caminho_completo: `${conta?.codigo || ''} > ${categoria?.nome || ''} > ${s.nome}`
+        };
+      });
+  }, [contas, categorias, subtipos]);
+
+  // Filtrar subtipos baseado na busca
+  const filteredSearchSubtipos = useMemo(() => {
+    if (!searchSubtipo.trim()) return [];
+
+    const search = searchSubtipo.toLowerCase().trim();
+    return allSubtipos
+      .filter(s =>
+        s.nome.toLowerCase().includes(search) ||
+        s.categoria_nome.toLowerCase().includes(search) ||
+        s.conta_nome.toLowerCase().includes(search)
+      )
+      .slice(0, 8);
+  }, [allSubtipos, searchSubtipo]);
+
+  // Aplicar classificação direta ao selecionar subtipo da busca
+  const handleSubtipoSelect = (subtipo: any) => {
+    setEditForm({
+      conta: subtipo.conta_codigo,
+      categoria: subtipo.categoria_nome,
+      subtipo: subtipo.nome,
+      descricao_classificada: editForm.descricao_classificada || transaction?.descricao_origem || ''
+    });
+    setSearchSubtipo('');
+  };
 
   useEffect(() => {
     if (transaction && transaction.subtipo_id) {
@@ -739,6 +785,45 @@ export function EditCardTransactionModal({
           {/* Formulário de classificação */}
           {canEdit && (
             <div className="space-y-4">
+              {/* Header com busca rápida de subtipo */}
+              <div className="flex items-center justify-between gap-3">
+                <h4 className="text-sm font-medium text-gray-300 flex items-center gap-2">
+                  📋 Classificação
+                </h4>
+
+                {/* Campo de busca de subtipo */}
+                <div className="flex-1 max-w-xs relative">
+                  <input
+                    type="text"
+                    value={searchSubtipo}
+                    onChange={(e) => setSearchSubtipo(e.target.value)}
+                    placeholder="Buscar subtipo..."
+                    autoFocus
+                    className="w-full p-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-100 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
+                  />
+
+                  {/* Dropdown de resultados */}
+                  {filteredSearchSubtipos.length > 0 && (
+                    <div className="absolute top-full left-0 right-0 mt-1 bg-gray-700 border border-gray-600 rounded-lg shadow-xl z-10 max-h-60 overflow-y-auto">
+                      {filteredSearchSubtipos.map((subtipo) => (
+                        <button
+                          key={subtipo.id}
+                          onClick={() => handleSubtipoSelect(subtipo)}
+                          className="w-full text-left p-3 hover:bg-gray-600 transition-colors border-b border-gray-600 last:border-b-0"
+                        >
+                          <div className="text-sm text-gray-100 font-medium">
+                            {subtipo.nome}
+                          </div>
+                          <div className="text-xs text-gray-400">
+                            {subtipo.caminho_completo}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
               <div>
                 <label className="text-sm text-gray-400 block mb-1">Conta *</label>
                 <select

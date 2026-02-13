@@ -52,6 +52,7 @@ export function BatchClassificationModal({
   const [showHistoric, setShowHistoric] = useState<Record<string, boolean>>({});
   const [selectedForComplex, setSelectedForComplex] = useState<Set<string>>(new Set()); // ✅ NOVO ESTADO
   const [preparingBatch, setPreparingBatch] = useState(false); // ✅ NOVO: Estado de preparação
+  const [searchSubtipo, setSearchSubtipo] = useState(''); // Busca rápida de subtipo
   
   // ✅ Dynamic hierarchy options
   const availableContas = useMemo(() => {
@@ -98,6 +99,54 @@ export function BatchClassificationModal({
     
     return selectedSubtipo?.id;
   }, [contas, categorias, subtipos]);
+
+  // Busca rápida: todos os subtipos ativos com caminho completo
+  const allSearchSubtipos = useMemo(() => {
+    return subtipos
+      .filter(s => s.ativo)
+      .map(s => {
+        const categoria = categorias.find(c => c.id === s.categoria_id);
+        const conta = categoria ? contas.find(c => c.id === categoria.conta_id) : null;
+        return {
+          id: s.id,
+          nome: s.nome,
+          categoria_nome: categoria?.nome || '',
+          conta_codigo: conta?.codigo || '',
+          conta_nome: conta?.nome || '',
+          caminho_completo: `${conta?.codigo || ''} > ${categoria?.nome || ''} > ${s.nome}`
+        };
+      });
+  }, [contas, categorias, subtipos]);
+
+  // Filtrar subtipos baseado na busca
+  const filteredSearchSubtipos = useMemo(() => {
+    if (!searchSubtipo.trim()) return [];
+    const search = searchSubtipo.toLowerCase().trim();
+    return allSearchSubtipos
+      .filter(s =>
+        s.nome.toLowerCase().includes(search) ||
+        s.categoria_nome.toLowerCase().includes(search) ||
+        s.conta_nome.toLowerCase().includes(search)
+      )
+      .slice(0, 8);
+  }, [allSearchSubtipos, searchSubtipo]);
+
+  // Aplicar subtipo selecionado da busca rápida no item atual
+  const handleSearchSubtipoSelect = (subtipo: typeof allSearchSubtipos[0]) => {
+    setBatchItems(prev => {
+      const updated = [...prev];
+      updated[currentIndex] = {
+        ...updated[currentIndex],
+        selectedConta: subtipo.conta_codigo,
+        selectedCategoria: subtipo.categoria_nome,
+        selectedSubtipo: subtipo.nome,
+        selectedSubtipoId: subtipo.id,
+        selectedDescricao: updated[currentIndex].selectedDescricao || updated[currentIndex].transaction.descricao_origem || ''
+      };
+      return updated;
+    });
+    setSearchSubtipo('');
+  };
 
   // Preparar dados quando modal abre
   useEffect(() => {
@@ -291,12 +340,14 @@ export function BatchClassificationModal({
   const goToNext = () => {
     if (currentIndex < batchItems.length - 1) {
       setCurrentIndex(currentIndex + 1);
+      setSearchSubtipo('');
     }
   };
 
   const goToPrevious = () => {
     if (currentIndex > 0) {
       setCurrentIndex(currentIndex - 1);
+      setSearchSubtipo('');
     }
   };
 
@@ -496,10 +547,13 @@ export function BatchClassificationModal({
               {/* Transação Atual */}
               <div className="bg-blue-900/30 border border-blue-600/50 rounded-md p-3 mb-4">
                 <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 text-xs">
                     <span className="text-blue-100 text-sm font-medium">📋</span>
+                    <span className="text-blue-300">{currentItem.transaction.origem}</span>
+                    <span className="text-blue-300">•</span>
+                    <span className="text-blue-300">{currentItem.transaction.cc}</span>
                     {isCardTransaction(currentItem.transaction) && (
-                      <span className="text-xs bg-purple-700 text-purple-200 px-2 py-1 rounded">
+                      <span className="bg-purple-700 text-purple-200 px-2 py-1 rounded">
                         {currentItem.transaction.fatura_id}
                       </span>
                     )}
@@ -519,111 +573,78 @@ export function BatchClassificationModal({
                   </div>
                 </div>
                 
-                <div className="grid grid-cols-4 gap-3 text-xs">
-                  <div>
-                    <label className="text-blue-300">Data:</label>
-                    <p className="text-blue-100">
+                <div className="text-xs space-y-1">
+                  {/* Data | Descrição | Valor */}
+                  <div className="flex items-start gap-3">
+                    <span className="text-blue-100 whitespace-nowrap">
                       {formatDate(
-                        isCardTransaction(currentItem.transaction) 
-                          ? currentItem.transaction.data_transacao 
+                        isCardTransaction(currentItem.transaction)
+                          ? currentItem.transaction.data_transacao
                           : currentItem.transaction.data
                       )}
-                    </p>
-                  </div>
-                  <div>
-                    <label className="text-blue-300">Valor:</label>
-                    <p className={`font-bold ${currentItem.transaction.valor >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {currentItem.transaction.valor >= 0 ? '+' : ''}R$ {formatCurrency(Math.abs(currentItem.transaction.valor))}
-                    </p>
-                  </div>
-                  <div>
-                    <label className="text-blue-300">Origem:</label>
-                    <p className="text-blue-100">{currentItem.transaction.origem}</p>
-                  </div>
-                  <div>
-                    <label className="text-blue-300">CC:</label>
-                    <p className="text-blue-100">{currentItem.transaction.cc}</p>
-                  </div>
-                  <div className="col-span-4">
-                    <label className="text-blue-300">Descrição Original:</label>
-                    <p className="text-blue-100 break-words font-medium">
+                    </span>
+                    <p className="text-blue-100 font-medium break-words line-clamp-2 flex-1 leading-tight">
                       {currentItem.transaction.descricao_origem}
                     </p>
+                    <span className={`font-bold whitespace-nowrap ${currentItem.transaction.valor >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {currentItem.transaction.valor >= 0 ? '+' : ''}R$ {formatCurrency(Math.abs(currentItem.transaction.valor))}
+                    </span>
                   </div>
                 </div>
               </div>
 
               {/* Lista de Histórico Similar */}
               {currentItem.historicSimilar && currentItem.historicSimilar.length > 0 && (
-                <div className="bg-gray-700 rounded-lg p-4 mb-4 border border-gray-600">
-                  <div 
-                    className="flex items-center justify-between cursor-pointer hover:bg-gray-600/50 transition-colors p-2 -m-2 rounded"
+                <div className="rounded-lg p-4 mb-4 border border-yellow-500/40" style={{ background: 'linear-gradient(135deg, #44370a 0%, #2a2518 30%, #1a1a2e 70%, #c0c0c0 150%)' }}>
+                  <div
+                    className="flex items-center justify-between cursor-pointer hover:bg-white/5 transition-colors p-2 -m-2 rounded"
                     onClick={() => toggleHistoric(currentIndex)}
                   >
                     <div className="flex items-center gap-2">
-                      <span className="text-gray-100 text-sm">📚 Histórico Similar</span>
-                      <span className="text-gray-300 text-xs">({currentItem.historicSimilar.length})</span>
-                      {currentItem.historicSimilar[0] && (
-                        <span className="text-xs bg-green-700 text-green-200 px-1.5 py-0.5 rounded">
-                          {Math.round(currentItem.historicSimilar[0].similarity * 100)}%
-                        </span>
-                      )}
+                      <span className="text-yellow-200 text-sm">✨ Histórico Similar</span>
+                      <span className="text-yellow-300/70 text-xs">({currentItem.historicSimilar.length})</span>
                     </div>
-                    <div className="text-blue-400 text-xs">
+                    <div className="text-yellow-300/80 text-xs">
                       {showHistoric[currentIndex] ? '▼' : '▶'}
                     </div>
                   </div>
                   
                   {showHistoric[currentIndex] && (
-                    <div className="space-y-2 max-h-60 overflow-y-auto">
+                    <div className="space-y-2 max-h-72 overflow-y-auto mt-3">
                       {currentItem.historicSimilar.map((item, idx) => (
                         <div
                           key={`${item.id}-${idx}`}
-                          className="border border-gray-600 rounded-md p-3 hover:bg-gray-600/50 cursor-pointer transition-colors"
+                          className={`border rounded-lg px-3 py-2.5 cursor-pointer transition-colors active:opacity-80 ${
+                            item.similarity > 0.8 ? 'bg-green-900/40 border-green-600/50 hover:bg-green-900/60' :
+                            item.similarity > 0.6 ? 'bg-yellow-900/30 border-yellow-600/50 hover:bg-yellow-900/50' :
+                            item.similarity > 0.4 ? 'bg-orange-900/25 border-orange-600/50 hover:bg-orange-900/45' :
+                            'bg-red-900/20 border-red-600/50 hover:bg-red-900/40'
+                          }`}
                           onClick={() => applyHistoricItem(currentIndex, item)}
                         >
-                          {/* Layout em grid 2 colunas - mais espaço para descrições no mobile */}
-                          <div className="grid grid-cols-3 sm:grid-cols-2 gap-1 sm:gap-2">
-                            {/* Coluna Esquerda - Descrições (2 colunas no mobile, 1 no desktop) */}
-                            <div className="space-y-0.5 col-span-2 sm:col-span-1">
-                              {/* Linha 1: descricao_origem + badge no final */}
-                              <div className="text-gray-200 text-xs font-medium line-clamp-2 leading-tight">
-                                {item.descricao_origem} <span className={`px-1.5 py-0.5 rounded text-xs font-bold ${
-                                  item.similarity > 0.8 ? 'bg-green-700 text-green-200' :
-                                  item.similarity > 0.6 ? 'bg-yellow-700 text-yellow-200' :
-                                  'bg-gray-700 text-gray-300'
-                                }`}>
-                                  {Math.round(item.similarity * 100)}%
+                          {/* Linha 1: Descrição original + Valor */}
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-gray-200 text-sm font-medium line-clamp-1 flex-1 leading-tight">
+                              {item.descricao_origem}
+                            </p>
+                            <span className={`font-bold text-sm whitespace-nowrap ${item.valor >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                              {item.valor >= 0 ? '+' : ''}R$ {formatCurrency(Math.abs(item.valor))}
+                            </span>
+                          </div>
+
+                          {/* Linha 2: Descrição classificada + Hierarquia */}
+                          <div className="flex items-center justify-between gap-2 mt-1">
+                            <p className="text-yellow-400 text-xs line-clamp-1 flex-1 leading-tight">
+                              → {item.descricao}
+                            </p>
+                            {(() => {
+                              const hierarchyInfo = visaoPlana?.find(v => v.subtipo_id === item.subtipo_id);
+                              return hierarchyInfo ? (
+                                <span className="text-xs text-gray-400 whitespace-nowrap">
+                                  {hierarchyInfo.conta_nome} › <span className="text-yellow-400 font-medium">{hierarchyInfo.subtipo_nome}</span>
                                 </span>
-                              </div>
-                              {/* Linha 2: descricao (truncada em 2 linhas, amarelo) */}
-                              <div className="text-yellow-400 text-xs line-clamp-2 leading-tight">
-                                → {item.descricao}
-                              </div>
-                            </div>
-                            
-                            {/* Coluna Direita - Valor e Classificação */}
-                            <div className="space-y-0.5 text-right text-xs">
-                              {/* Linha 1: Valor */}
-                              <div className={`font-bold ${item.valor >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                R$ {formatCurrency(Math.abs(item.valor))}
-                              </div>
-                              {/* Linha 2: Hierarquia compacta */}
-                              <div className="space-y-0">
-                                {(() => {
-                                  const hierarchyInfo = visaoPlana?.find(v => v.subtipo_id === item.subtipo_id);
-                                  return hierarchyInfo ? (
-                                    <>
-                                      <div className="text-gray-400">{hierarchyInfo.conta_nome}</div>
-                                      <div className="text-gray-400">→ {hierarchyInfo.categoria_nome}</div>
-                                      <div className="text-yellow-400 font-medium">→ {hierarchyInfo.subtipo_nome}</div>
-                                    </>
-                                  ) : (
-                                    <div className="text-gray-500">Sem classificação</div>
-                                  );
-                                })()}
-                              </div>
-                            </div>
+                              ) : null;
+                            })()}
                           </div>
                         </div>
                       ))}
@@ -650,6 +671,40 @@ export function BatchClassificationModal({
 
               {/* Formulário de Classificação */}
               <div className="space-y-4 mb-6">
+
+                {/* Busca rápida de subtipo */}
+                <div className="flex items-center justify-between gap-3">
+                  <h4 className="text-sm font-medium text-gray-300 flex items-center gap-2">
+                    📋 Classificação
+                  </h4>
+                  <div className="flex-1 max-w-xs relative">
+                    <input
+                      type="text"
+                      value={searchSubtipo}
+                      onChange={(e) => setSearchSubtipo(e.target.value)}
+                      placeholder="Buscar subtipo..."
+                      className="w-full p-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-100 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
+                    />
+                    {filteredSearchSubtipos.length > 0 && (
+                      <div className="absolute top-full left-0 right-0 mt-1 bg-gray-700 border border-gray-600 rounded-lg shadow-xl z-10 max-h-60 overflow-y-auto">
+                        {filteredSearchSubtipos.map((subtipo) => (
+                          <button
+                            key={subtipo.id}
+                            onClick={() => handleSearchSubtipoSelect(subtipo)}
+                            className="w-full text-left p-3 hover:bg-gray-600 transition-colors border-b border-gray-600 last:border-b-0"
+                          >
+                            <div className="text-sm text-gray-100 font-medium">
+                              {subtipo.nome}
+                            </div>
+                            <div className="text-xs text-gray-400">
+                              {subtipo.caminho_completo}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
 
                 <div className="grid grid-cols-3 gap-3">
                   <div>
@@ -744,29 +799,6 @@ export function BatchClassificationModal({
             </>
           )}
 
-          {/* Resumo */}
-          <div className="bg-gray-700 rounded-lg p-4 mb-6">
-            <h4 className="font-medium text-gray-100 mb-2">📊 Resumo</h4>
-            <div className="grid grid-cols-4 gap-4 text-sm">
-              <div className="text-center">
-                <p className="text-green-400 text-lg font-bold">{classificationSummary.classified}</p>
-                <p className="text-gray-300">Classificadas</p>
-              </div>
-              <div className="text-center">
-                <p className="text-yellow-400 text-lg font-bold">{classificationSummary.unclassified}</p>
-                <p className="text-gray-300">Não Classificadas</p>
-              </div>
-              <div className="text-center">
-                <p className="text-blue-400 text-lg font-bold">{classificationSummary.withSimilar}</p>
-                <p className="text-gray-300">Com Histórico</p>
-              </div>
-              {/* ✅ NOVA COLUNA */}
-              <div className="text-center">
-                <p className="text-orange-400 text-lg font-bold">{classificationSummary.selectedForComplex}</p>
-                <p className="text-gray-300">Para Complexa</p>
-              </div>
-            </div>
-          </div>
 
           {/* Erros */}
           {errors.length > 0 && (
@@ -793,8 +825,8 @@ export function BatchClassificationModal({
               disabled={loading}
               className="flex-1 py-2 px-4 bg-green-600 hover:bg-green-500 disabled:bg-gray-600 disabled:text-gray-400 text-white rounded transition-colors font-medium"
             >
-              {loading ? '⏳ Aplicando...' : 
-                `✅ Classificar ${classificationSummary.classified} • ⚪ ${classificationSummary.unclassified} Não Classificadas`
+              {loading ? '⏳ Aplicando...' :
+                `✅ ${classificationSummary.classified} • ⏳ ${classificationSummary.unclassified}`
               }
             </button>
           </div>

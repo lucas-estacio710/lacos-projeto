@@ -2,24 +2,34 @@ import { NextRequest, NextResponse } from 'next/server';
 import webpush from 'web-push';
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+// Forçar rota dinâmica (não pre-render no build)
+export const dynamic = 'force-dynamic';
 
-webpush.setVapidDetails(
-  'mailto:lacos@lacos.app',
-  process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!,
-  process.env.VAPID_PRIVATE_KEY!
-);
+let vapidConfigured = false;
+
+function ensureVapid() {
+  if (!vapidConfigured) {
+    webpush.setVapidDetails(
+      'mailto:lacos@lacos.app',
+      process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!,
+      process.env.VAPID_PRIVATE_KEY!
+    );
+    vapidConfigured = true;
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
+    ensureVapid();
+
     const { count } = await request.json();
 
     if (!count || count <= 0) {
       return NextResponse.json({ error: 'count inválido' }, { status: 400 });
     }
 
-    // Criar client server-side com anon key (RLS policy permite SELECT pra todos)
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
     const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
     // Buscar todas as subscriptions

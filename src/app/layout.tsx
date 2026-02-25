@@ -22,6 +22,19 @@ const michroma = Michroma({
 export const metadata: Metadata = {
   title: "LAÇOS 3.0 - ULTIMATE",
   description: "Sistema de gestão financeira com classificação inteligente",
+  manifest: "/manifest.json",
+  icons: {
+    icon: [
+      { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
+      { url: "/icon-192x192.png", sizes: "192x192", type: "image/png" },
+    ],
+    apple: "/apple-touch-icon.png",
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Laços",
+  },
 };
 
 export default function RootLayout({
@@ -30,7 +43,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="pt-BR">
+      <head>
+        <meta name="theme-color" content="#111827" />
+      </head>
       <body
         className={`${signika.variable} ${geistMono.variable} ${michroma.variable} antialiased font-[family-name:var(--font-signika)]`}
       >

@@ -3,7 +3,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Upload } from 'lucide-react';
+import { Upload, Bell } from 'lucide-react';
 import { Transaction } from '@/types';
 import { CardTransaction, ImportResult } from '@/hooks/useCardTransactions';
 import { ConfigProvider } from '@/contexts/ConfigContext';
@@ -12,6 +12,7 @@ import { ConfigProvider } from '@/contexts/ConfigContext';
 import { useTransactions } from '@/hooks/useTransactions';
 import { useCardTransactions } from '@/hooks/useCardTransactions';
 import { useHierarchy } from '@/hooks/useHierarchy';
+import { useNotifications } from '@/hooks/useNotifications';
 
 // Componentes
 import BankUpload from '@/components/BankUpload';
@@ -54,7 +55,9 @@ export default function DashboardPage() {
     markAsReconciled,
     getTransactionsForReconciliation
   } = useCardTransactions();
-  
+
+  const { isSupported: notifSupported, isSubscribed: notifSubscribed, subscribe: notifSubscribe, unsubscribe: notifUnsubscribe, loading: notifLoading } = useNotifications();
+
   // ===== ESTADOS =====
   const [activeTab, setActiveTab] = useState(() => {
     // Começar na overview por padrão, mudará para inbox se houver items
@@ -334,11 +337,29 @@ export default function DashboardPage() {
     }
   };
 
+  // ===== HELPER: PUSH NOTIFICATION =====
+  const sendUploadNotification = async (count: number) => {
+    if (count <= 0) return;
+    try {
+      await fetch('/api/send-notification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count })
+      });
+    } catch (err) {
+      console.error('Erro ao enviar push notification:', err);
+    }
+  };
+
   // ===== HANDLERS DE IMPORTAÇÃO =====
-  
+
   const handleTransactionsImported = async (importedTransactions: Transaction[]) => {
     try {
       const result = await addTransactions(importedTransactions);
+      // Enviar push notification se houve transações adicionadas
+      if (result?.success && result.stats?.added > 0) {
+        sendUploadNotification(result.stats.added);
+      }
       return result;
     } catch (error) {
       console.error('Erro ao importar transações:', error);
@@ -387,7 +408,12 @@ export default function DashboardPage() {
       
       if (result.success) {
         const { added, kept, removed } = result.stats;
-        
+
+        // Enviar push notification se houve transações adicionadas
+        if (added > 0) {
+          sendUploadNotification(added);
+        }
+
         alert(`✅ Fatura atualizada com sucesso!\n\n` +
               `➕ ${added} transações adicionadas\n` +
               `✅ ${kept} transações mantidas\n` +
@@ -721,7 +747,7 @@ export default function DashboardPage() {
               </div>
             </div>
             
-            {/* Online Status + Version */}
+            {/* Online Status + Version + Notifications */}
             <div className="flex items-center justify-center gap-3">
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
@@ -731,8 +757,24 @@ export default function DashboardPage() {
               </div>
               <span className="text-gray-600">|</span>
               <span className="text-xs font-mono text-gray-500">
-                v3.9.0
+                v3.10.0
               </span>
+              {notifSupported && (
+                <>
+                  <span className="text-gray-600">|</span>
+                  <button
+                    onClick={() => notifSubscribed ? notifUnsubscribe() : notifSubscribe()}
+                    disabled={notifLoading}
+                    className="flex items-center gap-1 transition-colors"
+                    title={notifSubscribed ? 'Desativar notificações push' : 'Ativar notificações push'}
+                  >
+                    <Bell className={`w-4 h-4 ${notifSubscribed ? 'text-green-400' : 'text-yellow-400'} ${notifLoading ? 'animate-pulse' : ''}`} />
+                    <span className={`text-xs font-mono ${notifSubscribed ? 'text-green-400' : 'text-yellow-400'}`}>
+                      {notifLoading ? '...' : notifSubscribed ? 'ON' : 'OFF'}
+                    </span>
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>

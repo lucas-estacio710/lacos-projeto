@@ -51,6 +51,17 @@ export default function RootLayout({
         className={`${signika.variable} ${geistMono.variable} ${michroma.variable} antialiased font-[family-name:var(--font-signika)]`}
       >
         {children}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.register('/sw.js').catch(function(err) {
+                  console.log('SW registration failed:', err);
+                });
+              }
+            `,
+          }}
+        />
       </body>
     </html>
   );

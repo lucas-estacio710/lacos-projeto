@@ -759,22 +759,24 @@ export default function DashboardPage() {
               <span className="text-xs font-mono text-gray-500">
                 v3.10.0
               </span>
-              {notifSupported && (
-                <>
-                  <span className="text-gray-600">|</span>
-                  <button
-                    onClick={() => notifSubscribed ? notifUnsubscribe() : notifSubscribe()}
-                    disabled={notifLoading}
-                    className="flex items-center gap-1 transition-colors"
-                    title={notifSubscribed ? 'Desativar notificações push' : 'Ativar notificações push'}
-                  >
-                    <Bell className={`w-4 h-4 ${notifSubscribed ? 'text-green-400' : 'text-yellow-400'} ${notifLoading ? 'animate-pulse' : ''}`} />
-                    <span className={`text-xs font-mono ${notifSubscribed ? 'text-green-400' : 'text-yellow-400'}`}>
-                      {notifLoading ? '...' : notifSubscribed ? 'ON' : 'OFF'}
-                    </span>
-                  </button>
-                </>
-              )}
+              <span className="text-gray-600">|</span>
+              <button
+                onClick={() => {
+                  if (!notifSupported) {
+                    alert('Seu navegador não suporta notificações push. Tente abrir no Chrome do celular.');
+                    return;
+                  }
+                  notifSubscribed ? notifUnsubscribe() : notifSubscribe();
+                }}
+                disabled={notifLoading}
+                className="flex items-center gap-1 transition-colors"
+                title={notifSubscribed ? 'Desativar notificações push' : 'Ativar notificações push'}
+              >
+                <Bell className={`w-4 h-4 ${notifSubscribed ? 'text-green-400' : 'text-yellow-400'} ${notifLoading ? 'animate-pulse' : ''}`} />
+                <span className={`text-xs font-mono ${notifSubscribed ? 'text-green-400' : 'text-yellow-400'}`}>
+                  {notifLoading ? '...' : notifSubscribed ? 'ON' : 'OFF'}
+                </span>
+              </button>
             </div>
           </div>
         </div>

@@ -22,7 +22,7 @@ export function useNotifications() {
   // Checar suporte e estado atual
   useEffect(() => {
     const checkStatus = async () => {
-      const supported = 'Notification' in window && 'serviceWorker' in navigator && 'PushManager' in window;
+      const supported = typeof window !== 'undefined' && 'Notification' in window && 'serviceWorker' in navigator && 'PushManager' in window;
       setIsSupported(supported);
 
       if (!supported) {
@@ -31,9 +31,16 @@ export function useNotifications() {
       }
 
       try {
-        const registration = await navigator.serviceWorker.ready;
-        const subscription = await registration.pushManager.getSubscription();
-        setIsSubscribed(!!subscription);
+        // Esperar SW registrar (com timeout de 3s pra não travar)
+        const swReady = await Promise.race([
+          navigator.serviceWorker.ready,
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000))
+        ]);
+
+        if (swReady) {
+          const subscription = await (swReady as ServiceWorkerRegistration).pushManager.getSubscription();
+          setIsSubscribed(!!subscription);
+        }
       } catch (err) {
         console.error('Erro ao checar subscription:', err);
       }

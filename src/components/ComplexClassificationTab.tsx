@@ -29,6 +29,7 @@ import { useConfig } from '@/contexts/ConfigContext';
 import { useHierarchy } from '@/hooks/useHierarchy';
 import { prepareClassificationOptions, getTransactionHierarchy } from '@/lib/hierarchyHelpers';
 import { HierarchyManager } from './HierarchyManager';
+import { UltimosLancamentosModal } from './UltimosLancamentosModal';
 
 interface ComplexClassificationTabProps {
   transactions: Transaction[];
@@ -99,6 +100,7 @@ export const ComplexClassificationTab: React.FC<ComplexClassificationTabProps> =
   const [showTonModal, setShowTonModal] = useState(false);
   const [showCremacoesModal, setShowCremacoesModal] = useState(false);
   const [showManualEntryModal, setShowManualEntryModal] = useState(false);
+  const [showUltimosLancamentosModal, setShowUltimosLancamentosModal] = useState(false);
 
   const statsHook = usePlanilhaStats();
   const entradasHook = useEntradasFinanceiras();
@@ -322,6 +324,16 @@ export const ComplexClassificationTab: React.FC<ComplexClassificationTabProps> =
                   <div className="font-medium text-base">Estrutura</div>
                 </div>
               </button>
+
+              <button
+                onClick={() => setShowUltimosLancamentosModal(true)}
+                className="w-full p-3 bg-cyan-900/30 hover:bg-cyan-800/50 border border-cyan-600 rounded-lg text-left group transition-all"
+              >
+                <div className="flex items-center gap-2 text-cyan-300 group-hover:text-cyan-200">
+                  <span className="text-lg">🕐</span>
+                  <div className="font-medium text-base">Últimos Lançamentos</div>
+                </div>
+              </button>
             </div>
           )}
 
@@ -516,10 +528,15 @@ export const ComplexClassificationTab: React.FC<ComplexClassificationTabProps> =
         }}
       />
       
-      <ManualEntryModal 
-        isOpen={showManualEntryModal} 
+      <ManualEntryModal
+        isOpen={showManualEntryModal}
         onClose={handleModalClose}
         onSuccess={handleManualEntrySuccess}
+      />
+
+      <UltimosLancamentosModal
+        isOpen={showUltimosLancamentosModal}
+        onClose={() => setShowUltimosLancamentosModal(false)}
       />
     </div>
   );

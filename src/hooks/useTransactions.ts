@@ -216,7 +216,8 @@ const addTransactions = async (newTransactions: Transaction[]) => {
       linked_future_group: updatedTransaction.linked_future_group || null,
       is_from_reconciliation: updatedTransaction.is_from_reconciliation || false,
       future_subscription_id: updatedTransaction.future_subscription_id || null,
-      reconciliation_metadata: updatedTransaction.reconciliation_metadata || null
+      reconciliation_metadata: updatedTransaction.reconciliation_metadata || null,
+      updated_at: new Date().toISOString()
     };
 
     try {

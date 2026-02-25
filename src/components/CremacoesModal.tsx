@@ -648,7 +648,7 @@ export function CremacoesModal({
             <div className="h-full flex flex-col">
               
               {/* BLOCO 1: Transações Não Classificadas */}
-              <div className="h-[20%] border-b border-gray-700">
+              <div className="min-h-[15%] max-h-[30%] border-b border-gray-700 flex flex-col">
                 <div className="p-2 border-b border-gray-700 bg-gray-850">
                   <h4 className="font-medium text-gray-100 text-sm flex items-center gap-2">
                     💛 Não Classificadas ({allCremacoesTransactions.length})
@@ -658,7 +658,7 @@ export function CremacoesModal({
                   </h4>
                 </div>
                 
-                <div className="h-full overflow-y-auto p-1">
+                <div className="flex-1 overflow-y-auto p-1">
                   <div className="space-y-1">
                     {allCremacoesTransactions
                       .sort((a, b) => Math.abs(b.valor) - Math.abs(a.valor))
@@ -727,8 +727,8 @@ export function CremacoesModal({
               )}
 
               {/* BLOCO 2: Seletor de Input */}
-              <div className="h-[40%] border-b border-gray-700">
-                <div className="p-2 border-b border-gray-700 bg-gray-850">
+              <div className="flex-1 border-b border-gray-700 flex flex-col overflow-hidden">
+                <div className="p-2 border-b border-gray-700 bg-gray-850 flex-1 flex flex-col overflow-hidden">
                   {/* Seletor Automático/Manual - Full Width */}
                   <div className="w-full bg-gray-700 rounded-lg p-0.5 grid grid-cols-2 gap-0.5 mb-2">
                     <button
@@ -895,7 +895,7 @@ DD/MM/AAAA;NOME-PET-TIPO;VALOR
 
                   {/* Preview de Lançamentos - Compartilhado entre automático e manual */}
                   {previewTransactions.length > 0 && (
-                    <div className="border-b border-blue-600 mt-2">
+                    <div className="border-b border-blue-600 mt-2 flex-1 flex flex-col overflow-hidden">
                       <div className="p-2 border-b border-blue-600 bg-blue-900/30">
                         <div className="flex items-center justify-between">
                           <h4 className="font-medium text-blue-100 text-sm flex items-center gap-2">
@@ -913,7 +913,7 @@ DD/MM/AAAA;NOME-PET-TIPO;VALOR
                         </div>
                       </div>
                       
-                      <div className="max-h-96 overflow-y-auto p-1">
+                      <div className="flex-1 overflow-y-auto p-1">
                         <div className="space-y-1">
                           {previewTransactions.map((transaction, index) => (
                             <div key={`preview-${index}`} className="border rounded transition-all border-blue-600 bg-gray-900 hover:border-blue-500">

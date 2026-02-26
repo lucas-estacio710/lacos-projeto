@@ -19,7 +19,6 @@ export function useNotifications() {
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // Checar suporte e estado atual
   useEffect(() => {
     const checkStatus = async () => {
       const supported = typeof window !== 'undefined' && 'Notification' in window && 'serviceWorker' in navigator && 'PushManager' in window;
@@ -31,7 +30,6 @@ export function useNotifications() {
       }
 
       try {
-        // Esperar SW registrar (com timeout de 3s pra não travar)
         const swReady = await Promise.race([
           navigator.serviceWorker.ready,
           new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000))
@@ -57,29 +55,48 @@ export function useNotifications() {
     try {
       setLoading(true);
 
-      // Pedir permissão
-      const permission = await Notification.requestPermission();
-      if (permission !== 'granted') {
-        console.log('Permissão de notificação negada');
+      // 1. Checar VAPID key
+      if (!VAPID_PUBLIC_KEY) {
+        alert('❌ VAPID key não configurada. Verifique as env vars no Vercel.');
         setLoading(false);
         return false;
       }
 
-      // Registrar/obter SW
+      // 2. Pedir permissão
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        alert('❌ Permissão de notificação negada.');
+        setLoading(false);
+        return false;
+      }
+
+      // 3. Registrar/obter SW
       const registration = await navigator.serviceWorker.ready;
 
-      // Criar subscription
-      const subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
-      });
+      // 4. Criar push subscription
+      let subscription;
+      try {
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+        });
+      } catch (pushErr) {
+        alert('❌ Erro ao criar push subscription: ' + (pushErr instanceof Error ? pushErr.message : pushErr));
+        setLoading(false);
+        return false;
+      }
 
       const subscriptionJson = subscription.toJSON();
 
-      // Salvar no Supabase
+      // 5. Checar user autenticado
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Usuário não autenticado');
+      if (!user) {
+        alert('❌ Usuário não autenticado no Supabase.');
+        setLoading(false);
+        return false;
+      }
 
+      // 6. Salvar no Supabase
       const { error } = await supabase
         .from('push_subscriptions')
         .upsert({
@@ -91,14 +108,18 @@ export function useNotifications() {
           onConflict: 'endpoint'
         });
 
-      if (error) throw error;
+      if (error) {
+        alert('❌ Erro ao salvar no Supabase: ' + error.message);
+        setLoading(false);
+        return false;
+      }
 
       setIsSubscribed(true);
-      console.log('✅ Push subscription ativada');
+      alert('✅ Notificações push ativadas!');
       return true;
 
     } catch (err) {
-      console.error('Erro ao ativar push:', err);
+      alert('❌ Erro inesperado: ' + (err instanceof Error ? err.message : err));
       return false;
     } finally {
       setLoading(false);
@@ -113,7 +134,6 @@ export function useNotifications() {
       const subscription = await registration.pushManager.getSubscription();
 
       if (subscription) {
-        // Remover do Supabase
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           await supabase
@@ -121,17 +141,15 @@ export function useNotifications() {
             .delete()
             .eq('endpoint', subscription.endpoint);
         }
-
-        // Cancelar no browser
         await subscription.unsubscribe();
       }
 
       setIsSubscribed(false);
-      console.log('🔕 Push subscription desativada');
+      alert('🔕 Notificações push desativadas.');
       return true;
 
     } catch (err) {
-      console.error('Erro ao desativar push:', err);
+      alert('❌ Erro ao desativar: ' + (err instanceof Error ? err.message : err));
       return false;
     } finally {
       setLoading(false);
